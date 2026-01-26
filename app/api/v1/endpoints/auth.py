@@ -16,6 +16,7 @@ from app.schemas.schemas import (
     TokenRefresh, 
     UserResponse
 )
+from app.schemas.swagger_schemas import LoginResponse, User as UserSwagger
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -45,9 +46,13 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     return new_user
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=LoginResponse)
 async def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    """Login and get JWT tokens."""
+    """
+    Login and get JWT tokens.
+    
+    Returns token and user object as per Swagger spec.
+    """
     # Find user
     user = db.query(User).filter(User.email == user_data.email).first()
     if not user:
@@ -65,13 +70,22 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     
     # Create tokens
     access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
-    }
+    # Create user response
+    user_response = UserSwagger(
+        id=user.id,
+        email=user.email,
+        firstName=user.first_name,
+        lastName=user.last_name,
+        avatar=user.avatar,
+        role=user.role,
+        settings=user.settings or {}
+    )
+    
+    return LoginResponse(
+        token=access_token,
+        user=user_response
+    )
 
 
 @router.post("/refresh", response_model=Token)

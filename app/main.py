@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
 from contextlib import asynccontextmanager
@@ -39,8 +41,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="EduStream API",
-    description="Virtual Teaching Assistant API",
-    version="1.0.0",
+    description="Virtual Teaching Assistant API - Aligned with Swagger Specification",
+    version="1.4.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -55,6 +57,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Global exception handlers as per Swagger spec
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    """
+    Global validation error handler.
+    Returns standardized error response: {code, message, details}
+    """
+    errors = {}
+    for error in exc.errors():
+        field = ".".join(str(x) for x in error["loc"])
+        errors[field] = error["msg"]
+    
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": 422,
+            "message": "Validation Error",
+            "details": errors
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """
+    Global exception handler for unhandled errors.
+    Returns standardized error response.
+    """
+    logger.error(f"Unhandled exception: {exc}")
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "code": 500,
+            "message": "Internal Server Error",
+            "details": {"error": str(exc)}
+        }
+    )
+
+
 # Include API router
 app.include_router(api_router)
 
@@ -65,7 +108,8 @@ async def root():
     return {
         "message": "Welcome to EduStream API",
         "docs": "/docs",
-        "version": "1.0.0"
+        "version": "1.4.0",
+        "swagger_compliant": True
     }
 
 
