@@ -1,0 +1,680 @@
+openapi: 3.0.0
+info:
+  title: EduStream API
+  description: >
+    API для образовательной платформы EduStream.
+    
+    **Бизнес-контекст:**
+    EduStream помогает учителям автоматизировать рутину: проверку рукописных работ (OCR) и создание учебных материалов (AI).
+    Критически важна скорость ответа API и устойчивость к ошибкам LLM.
+    
+    **Архитектура:**
+    *   **Hybrid RAG:** Контекст берется из загруженных PDF (Materials).
+    *   **Long-polling/WebSockets:** Для статусов OCR (заложены на будущее, сейчас REST).
+    *   **Idempotency:** Критична для генерации тестов (избегать дублей при ретраях).
+  version: 1.4.0
+  contact:
+    name: System Architect
+    email: arch@edustream.app
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Dev
+  - url: https://api.edustream.app/v1
+    description: Production
+
+tags:
+  - name: Dashboard
+    description: Агрегация данных для "Главного экрана управления" учителя.
+  - name: AI Engine
+    description: Оркестрация запросов к LLM, управление контекстом RAG и промпт-инжиниринг.
+  - name: OCR
+    description: Пайплайн обработки изображений: Upload -> Recognition -> Grading.
+  - name: Analytics
+    description: Визуализация прогресса класса и отдельных учеников.
+  - name: Materials
+    description: Управление базой знаний (PDF, изображения) для RAG.
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # --- Common ---
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 422
+        message:
+          type: string
+          example: "Validation Error"
+        details:
+          type: object
+          description: "Детали ошибки по полям (для форм)"
+
+    # --- AI Specific ---
+    QuizTemplate:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+          example: "Входное тестирование"
+        desc:
+          type: string
+          example: "15 вопросов для оценки базовых знаний"
+        icon:
+          type: string
+          example: "login"
+        color:
+          type: string
+          example: "blue"
+        config:
+          $ref: '#/components/schemas/QuizConfig'
+
+    QuizConfig:
+      type: object
+      required: [materialId, difficulty, count, type]
+      properties:
+        materialId:
+          type: string
+          format: uuid
+          description: "ID документа-источника знаний"
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+          description: "Влияет на лексику и глубину вопросов"
+        count:
+          type: integer
+          minimum: 1
+          maximum: 50
+        type:
+          type: string
+          enum: [mcq, open, boolean]
+
+    Question:
+      type: object
+      description: "Единица контента теста"
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [mcq, open, boolean]
+        text:
+          type: string
+          example: "Какова основная функция митохондрий?"
+        options:
+          type: array
+          items:
+            type: string
+          description: "Варианты ответов (только для MCQ)"
+        correctAnswer:
+          type: string
+        explanation:
+          type: string
+          description: "Методическое пояснение от ИИ, почему ответ верен. Критично для режима 'Презентация' и печати ключей."
+
+    # --- OCR Specific ---
+    OCRRegion:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+          example: "Вопрос 1"
+        original:
+          type: string
+          description: "Исходный текст вопроса из базы заданий (Эталон)"
+        ocrText:
+          type: string
+          description: "Текст, распознанный с рукописного ввода студента"
+        confidence:
+          type: string
+          enum: [High, Low]
+          description: "Флаг для UI: если Low, слово подчеркивается желтым"
+        match:
+          type: integer
+          description: "Процент семантической близости ответа студента к эталону"
+
+    StudentResult:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        student:
+          type: object
+          properties:
+            name:
+              type: string
+            accuracy:
+              type: integer
+              description: "Средний балл точности по всем вопросам"
+        image:
+          type: string
+          format: uri
+          description: "URL скана работы"
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/OCRRegion'
+
+    # --- Analytics & Dashboard ---
+    DashboardData:
+      type: object
+      description: "Агрегированный объект для минимизации запросов при загрузке Dashboard"
+      properties:
+        pieChart:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              value: { type: integer }
+              color: { type: string }
+        needsReview:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              subject: { type: string }
+              img: { type: string }
+              type: { type: string, enum: [ocr, quiz] }
+        recentActivity:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              title: { type: string }
+              source: { type: string }
+              time: { type: string }
+              status: { type: string }
+              statusColor: { type: string }
+              type: { type: string }
+              action: { type: string }
+
+    AnalyticsData:
+      type: object
+      properties:
+        performance:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              value: { type: integer }
+        topics:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              score: { type: integer }
+              colorKey: { type: string }
+        students:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudentMetric'
+
+    StudentMetric:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        status: { type: string }
+        progress: { type: number }
+        trend: { type: string, enum: [up, down, neutral] }
+        color: { type: string }
+        avatar: { type: string }
+
+    # --- Common Entities ---
+    User:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        avatar: { type: string }
+        role: { type: string }
+        settings:
+          type: object
+          properties:
+            notifications:
+              type: object
+              properties:
+                reports: { type: boolean }
+                errors: { type: boolean }
+                lowPerformance: { type: boolean }
+
+    Material:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        content: { type: string }
+        uploadDate: { type: string }
+        status: { type: string, enum: [processing, ready, error] }
+
+    ShareConfig:
+      type: object
+      required: [resourceId, resourceType]
+      properties:
+        resourceId: { type: string }
+        resourceType: { type: string, enum: [quiz, ocr_result, material] }
+        viewOnly: { type: boolean }
+        allowCopy: { type: boolean }
+        password: { type: string }
+
+    ShareLink:
+      type: object
+      properties:
+        url: { type: string }
+
+security:
+  - BearerAuth: []
+
+paths:
+  # --- Auth ---
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Аутентификация
+      description: Поддерживает вход по паролю и (в будущем) magic link.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+
+  # --- Dashboard ---
+  /dashboard/overview:
+    get:
+      tags: [Dashboard]
+      summary: Главный экран
+      description: >
+        **Сценарий:** Учитель открывает приложение.
+        **Зачем:** Получить мгновенную сводку: что требует проверки (OCR), статистика класса, последние действия.
+        Данные должны быть отфильтрованы по `courseId`.
+      parameters:
+        - in: query
+          name: courseId
+          required: true
+          schema:
+            type: string
+            example: "9A"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardData'
+
+  # --- AI Engine ---
+  /ai/templates:
+    get:
+      tags: [AI Engine]
+      summary: Галерея шаблонов тестов
+      description: >
+        **Сценарий:** Dashboard -> Галерея шаблонов.
+        Возвращает список пресетов (например, "Пятиминутка", "Итоговая"), чтобы учитель не настраивал конфиг с нуля.
+      responses:
+        '200':
+          description: Список шаблонов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizTemplate'
+
+  /ai/chat:
+    post:
+      tags: [AI Engine]
+      summary: RAG Chat
+      description: >
+        Основной эндпоинт для чата в AI Workspace.
+        Использует `materialId` для извлечения контекста (Retrieval Augmented Generation).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                materialId: { type: string }
+                message: { type: string }
+      responses:
+        '200':
+          description: Ответ ИИ
+        '429':
+          description: Rate Limit Exceeded (слишком много запросов)
+        '503':
+          description: LLM Service Unavailable
+
+  /ai/smart-action:
+    post:
+      tags: [AI Engine]
+      summary: Контекстные действия (Smart Selection)
+      description: >
+        **Сценарий:** Учитель выделяет текст в документе -> всплывает меню -> выбирает "Упростить" или "Объяснить".
+        Легковесный эндпоинт для быстрых трансформаций текста без сохранения в историю чата.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text, action]
+              properties:
+                text: 
+                  type: string
+                  description: "Выделенный фрагмент текста"
+                action:
+                  type: string
+                  enum: [explain, simplify, translate, summarize]
+                context:
+                  type: string
+                  description: "Опционально: окружающий параграф для лучшего понимания"
+      responses:
+        '200':
+          description: Результат обработки
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: { type: string }
+
+  /ai/generate-quiz:
+    post:
+      tags: [AI Engine]
+      summary: Генератор тестов
+      description: >
+        **Сценарий:** AI Workspace -> Tab "Test Builder".
+        Генерирует массив вопросов на основе материала.
+        Важно: Ответ должен быть строго структурирован JSON.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizConfig'
+      responses:
+        '200':
+          description: Сгенерированный тест
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quiz'
+        '422':
+          description: Невалидная конфигурация (например, count > 50)
+        '504':
+          description: Timeout (генерация заняла слишком много времени)
+
+  /ai/regenerate-block:
+    post:
+      tags: [AI Engine]
+      summary: Точечная перегенерация
+      description: >
+        **Сценарий:** Учителю не понравился один конкретный вопрос в тесте.
+        Вместо пересоздания всего теста, мы обновляем только один блок, сохраняя общий контекст.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                blockId: { type: string }
+                currentText: { type: string }
+                instruction: 
+                  type: string
+                  example: "Сделай вопрос сложнее"
+      responses:
+        '200':
+          description: Обновленный вопрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+
+  /ai/sessions:
+    get:
+      tags: [AI Engine]
+      summary: История чатов
+      description: Для Sidebar в AI Workspace.
+      responses:
+        '200':
+          description: Список сессий
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    title: { type: string }
+                    date: { type: string }
+                    docId: { type: string }
+
+  # --- OCR ---
+  /ocr/results/{id}:
+    get:
+      tags: [OCR]
+      summary: Детали проверки
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Данные работы
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentResult'
+    patch:
+      tags: [OCR]
+      summary: Ручная коррекция
+      description: >
+        **Сценарий:** Учитель исправляет ошибку распознавания текста или меняет оценку вручную.
+        Это действие должно пересчитывать статистику студента в Analytics.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manualScore: { type: integer }
+                correctedText: 
+                  type: object
+                  description: "Map<RegionID, NewText>"
+      responses:
+        '200':
+          description: Saved
+
+  /ocr/batch-approve:
+    post:
+      tags: [OCR]
+      summary: Пакетное подтверждение
+      description: >
+        **Сценарий:** Dashboard -> Кнопка "Подтвердить все" в очереди OCR или на странице OCR.
+        Принимает массив ID работ. Переводит их статус в "Graded" и обновляет журнал.
+        **Важно:** Если среди работ есть Low Confidence регионы, бэкенд должен либо принять их как есть, либо вернуть предупреждение (в зависимости от настроек).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: Успешно подтверждено
+        '207':
+          description: Multi-Status (часть подтверждена, часть с ошибками)
+
+  # --- Materials ---
+  /materials:
+    get:
+      tags: [Materials]
+      summary: Список файлов
+      responses:
+        '200':
+          description: List
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Material'
+    post:
+      tags: [Materials]
+      summary: Загрузка (Upload)
+      description: >
+        Загрузка PDF или изображений.
+        Запускает асинхронный пайплайн: OCR -> Text Extraction -> Vector Embedding (для RAG).
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                courseId: { type: string }
+      responses:
+        '202':
+          description: Accepted (Processing started)
+
+  /materials/{id}:
+    get:
+      tags: [Materials]
+      summary: Контент документа
+      description: Возвращает сырой текст документа для отображения в левой панели AI Workspace.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Material'
+
+  # --- Analytics ---
+  /analytics/performance:
+    get:
+      tags: [Analytics]
+      summary: Полная аналитика
+      description: Данные для графиков, карты знаний и списка студентов.
+      parameters:
+        - in: query
+          name: courseId
+          schema: { type: string }
+      responses:
+        '200':
+          description: Analytics Data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsData'
+
+  # --- Users ---
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Профиль
+      responses:
+        '200':
+          description: User Profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    patch:
+      tags: [Users]
+      summary: Обновление настроек
+      description: Обновление имени, аватара и тумблеров уведомлений.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName: { type: string }
+                lastName: { type: string }
+                settings: { $ref: '#/components/schemas/UserSettings' }
+      responses:
+        '200':
+          description: Updated
+
+  # --- Shared ---
+  /reports/export:
+    post:
+      tags: [Analytics]
+      summary: Генерация отчета (PDF/Excel)
+      description: Возвращает бинарный поток файла.
+      responses:
+        '200':
+          description: File Stream
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /share/create:
+    post:
+      tags: [Shared]
+      summary: Публичный шеринг
+      description: Создает короткую ссылку для доступа к тесту или результатам OCR без логина (view-only).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareConfig'
+      responses:
+        '201':
+          description: Link Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareLink'
