@@ -41,7 +41,7 @@ class AIService:
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=settings.OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "Ты опытный методист, создающий учебные материалы."},
                     {"role": "user", "content": prompt}
@@ -111,7 +111,7 @@ class AIService:
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=settings.OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "Ты опытный методист, создающий тесты."},
                     {"role": "user", "content": prompt}

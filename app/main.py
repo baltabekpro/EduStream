@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 import sys
+from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.api.v1.router import api_router
 from app.core.database import Base, engine
@@ -20,8 +21,20 @@ logger.add(
     level="INFO"
 )
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
+    logger.info("Starting EduStream API...")
+    Base.metadata.create_all(bind=engine)
+    logger.info(f"Documentation available at: http://{settings.HOST}:{settings.PORT}/docs")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down EduStream API...")
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -29,7 +42,8 @@ app = FastAPI(
     description="Virtual Teaching Assistant API",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Configure CORS
@@ -59,19 +73,6 @@ async def root():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
-
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting EduStream API...")
-    logger.info(f"Documentation available at: http://{settings.HOST}:{settings.PORT}/docs")
-
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Shutting down EduStream API...")
 
 
 if __name__ == "__main__":

@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-3.5-turbo"
     
-    # Google Cloud Vision
+    # Google Cloud Vision (optional for future use)
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
     
     # File Storage
