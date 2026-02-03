@@ -168,3 +168,35 @@ async def batch_approve_ocr(
         "status": "success",
         "approved": results
     }
+
+
+@router.get("/queue")
+async def get_ocr_queue(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    """
+    Получить очередь OCR задач.
+    
+    Возвращает список ожидающих и обрабатываемых OCR задач.
+    """
+    # Get pending OCR results
+    ocr_results = db.query(OCRResult).filter(
+        OCRResult.user_id == current_user.id,
+        OCRResult.status.in_(["processing", "pending"])
+    ).all()
+    
+    queue_items = [
+        {
+            "id": str(result.id),
+            "filename": result.image_url or "unknown",
+            "status": result.status,
+            "created_at": result.created_at.isoformat()
+        }
+        for result in ocr_results
+    ]
+    
+    return {
+        "queue": queue_items,
+        "total": len(queue_items)
+    }

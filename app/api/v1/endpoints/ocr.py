@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.dependencies import get_current_teacher
 from app.models.models import User
-from app.schemas.schemas import OCRRecognizeResponse
+from app.schemas.schemas import OCRRecognizeResponse, OCRQueueResponse
 from app.services.ocr_service import ocr_service
 import os
 import uuid
@@ -74,3 +74,19 @@ async def recognize_text(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OCR processing failed: {str(e)}"
         )
+
+
+@router.get("/queue", response_model=OCRQueueResponse)
+async def get_ocr_queue(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    """
+    Get OCR processing queue (currently returns empty queue as we process synchronously).
+    """
+    # For now, return empty queue since OCR is processed synchronously
+    # In future, this could track background OCR tasks
+    return {
+        "queue": [],
+        "total": 0
+    }

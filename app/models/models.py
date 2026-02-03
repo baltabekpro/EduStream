@@ -65,6 +65,7 @@ class UserRole(str, enum.Enum):
     """User role enumeration."""
     TEACHER = "teacher"
     ADMIN = "admin"
+    STUDENT = "student"
 
 
 class MaterialStatus(str, enum.Enum):

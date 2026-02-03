@@ -23,7 +23,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserRegister, db: Session = Depends(get_db)):
-    """Register a new teacher or admin."""
+    """Register a new user (teacher, admin, or student)."""
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
@@ -32,10 +32,20 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
     
+    # Parse name into first_name and last_name if provided
+    first_name = None
+    last_name = None
+    if user_data.name:
+        name_parts = user_data.name.strip().split(maxsplit=1)
+        first_name = name_parts[0] if len(name_parts) > 0 else None
+        last_name = name_parts[1] if len(name_parts) > 1 else None
+    
     # Create new user
     new_user = User(
         email=user_data.email,
         password_hash=get_password_hash(user_data.password),
+        first_name=first_name,
+        last_name=last_name,
         role=user_data.role
     )
     

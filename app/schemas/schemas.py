@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, UUID4
+from pydantic import BaseModel, EmailStr, Field, UUID4, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -8,6 +8,7 @@ from enum import Enum
 class UserRole(str, Enum):
     TEACHER = "teacher"
     ADMIN = "admin"
+    STUDENT = "student"
 
 
 class QuestionType(str, Enum):
@@ -18,8 +19,17 @@ class QuestionType(str, Enum):
 # Auth Schemas
 class UserRegister(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=8, max_length=72, description="Password (8-72 characters)")
+    name: Optional[str] = Field(None, max_length=255, description="Full name or first name")
     role: UserRole = UserRole.TEACHER
+    
+    @field_validator('role', mode='before')
+    @classmethod
+    def normalize_role(cls, v):
+        """Convert role to lowercase for case-insensitive input"""
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class UserLogin(BaseModel):
@@ -100,6 +110,18 @@ class GenerateQuizResponse(BaseModel):
 class OCRRecognizeResponse(BaseModel):
     text: str
     errors: Optional[List[str]] = None
+
+
+class OCRQueueItem(BaseModel):
+    id: UUID4
+    filename: str
+    status: str
+    created_at: datetime
+    
+
+class OCRQueueResponse(BaseModel):
+    queue: List[OCRQueueItem]
+    total: int
 
 
 # Analytics Schemas

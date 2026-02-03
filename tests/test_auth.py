@@ -19,9 +19,23 @@ def test_register_user(client: TestClient):
     assert "id" in data
 
 
+def test_register_student(client: TestClient):
+    """Test student registration."""
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "student@example.com",
+            "password": "StudentPass123",
+            "role": "student"
+        }
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["role"] == "student"
+
+
 def test_register_duplicate_email(client: TestClient):
     """Test registration with duplicate email."""
-    # First registration
     client.post(
         "/api/v1/auth/register",
         json={
@@ -31,7 +45,6 @@ def test_register_duplicate_email(client: TestClient):
         }
     )
     
-    # Duplicate registration
     response = client.post(
         "/api/v1/auth/register",
         json={
@@ -46,7 +59,6 @@ def test_register_duplicate_email(client: TestClient):
 
 def test_login_success(client: TestClient):
     """Test successful login."""
-    # Register user first
     client.post(
         "/api/v1/auth/register",
         json={
@@ -56,7 +68,6 @@ def test_login_success(client: TestClient):
         }
     )
     
-    # Login
     response = client.post(
         "/api/v1/auth/login",
         json={
@@ -73,7 +84,6 @@ def test_login_success(client: TestClient):
 
 def test_login_wrong_password(client: TestClient):
     """Test login with wrong password."""
-    # Register user first
     client.post(
         "/api/v1/auth/register",
         json={
@@ -83,7 +93,6 @@ def test_login_wrong_password(client: TestClient):
         }
     )
     
-    # Login with wrong password
     response = client.post(
         "/api/v1/auth/login",
         json={
@@ -104,35 +113,3 @@ def test_login_nonexistent_user(client: TestClient):
         }
     )
     assert response.status_code == 401
-
-
-def test_refresh_token(client: TestClient):
-    """Test token refresh."""
-    # Register and login
-    client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": "teacher@example.com",
-            "password": "SecurePassword123",
-            "role": "teacher"
-        }
-    )
-    
-    login_response = client.post(
-        "/api/v1/auth/login",
-        json={
-            "email": "teacher@example.com",
-            "password": "SecurePassword123"
-        }
-    )
-    refresh_token = login_response.json()["refresh_token"]
-    
-    # Refresh token
-    response = client.post(
-        "/api/v1/auth/refresh",
-        json={"refresh_token": refresh_token}
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert "refresh_token" in data

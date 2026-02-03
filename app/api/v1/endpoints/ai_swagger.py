@@ -20,8 +20,8 @@ from app.schemas.swagger_schemas import (
     QuestionType
 )
 from app.services.ai_service import ai_service
-import uuid
 from datetime import datetime
+import uuid
 
 router = APIRouter(prefix="/ai", tags=["AI Engine"])
 
@@ -103,8 +103,17 @@ async def ai_chat(
     
     context = ""
     if request.materialId:
+        # Validate UUID format
+        try:
+            material_uuid = uuid.UUID(request.materialId) if isinstance(request.materialId, str) else request.materialId
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid materialId format: {request.materialId}"
+            )
+        
         material = db.query(Material).filter(
-            Material.id == request.materialId,
+            Material.id == material_uuid,
             Material.user_id == current_user.id
         ).first()
         
@@ -183,9 +192,18 @@ async def generate_quiz(
             detail="count must be between 1 and 50"
         )
     
+    # Validate materialId UUID format
+    try:
+        material_uuid = uuid.UUID(str(config.materialId)) if not isinstance(config.materialId, uuid.UUID) else config.materialId
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid materialId format: {config.materialId}"
+        )
+    
     # Get material
     material = db.query(Material).filter(
-        Material.id == config.materialId,
+        Material.id == material_uuid,
         Material.user_id == current_user.id
     ).first()
     

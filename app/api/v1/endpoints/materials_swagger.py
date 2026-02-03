@@ -106,8 +106,17 @@ async def get_material(
     
     Возвращает сырой текст документа для отображения в левой панели AI Workspace.
     """
+    # Validate UUID format
+    try:
+        material_uuid = uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid UUID format: {id}"
+        )
+    
     material = db.query(MaterialModel).filter(
-        MaterialModel.id == id,
+        MaterialModel.id == material_uuid,
         MaterialModel.user_id == current_user.id
     ).first()
     

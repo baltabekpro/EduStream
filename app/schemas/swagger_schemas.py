@@ -2,10 +2,11 @@
 Pydantic schemas aligned with swagger.yml specification.
 All schemas strictly follow the Swagger contract.
 """
-from pydantic import BaseModel, EmailStr, Field, UUID4
+from pydantic import BaseModel, EmailStr, Field, UUID4, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+import uuid
 
 
 # ===== Enums =====
@@ -111,6 +112,17 @@ class QuizConfig(BaseModel):
     difficulty: Difficulty = Field(..., description="Влияет на лексику и глубину вопросов")
     count: int = Field(..., ge=1, le=50)
     type: QuestionType
+    
+    @field_validator('materialId', mode='before')
+    @classmethod
+    def validate_material_id(cls, v):
+        """Validate materialId is a valid UUID."""
+        if isinstance(v, str):
+            try:
+                return uuid.UUID(v)
+            except ValueError:
+                raise ValueError(f"materialId must be a valid UUID, got: {v}")
+        return v
 
 
 class Question(BaseModel):
