@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.dependencies import get_current_teacher
 from app.models.models import User, Material as MaterialModel, MaterialStatus
-from app.schemas.swagger_schemas import Material, MaterialUploadResponse
+from app.schemas.swagger_schemas import Material, MaterialUploadResponse, MaterialUpdate
 from app.services.file_processor import file_processor
 import uuid
 from datetime import datetime
@@ -133,3 +133,108 @@ async def get_material(
         uploadDate=material.upload_date.isoformat() if material.upload_date else material.created_at.isoformat(),
         status=material.status
     )
+
+
+@router.patch("/{id}", response_model=Material)
+async def update_material(
+    id: str = Path(..., description="Material ID"),
+    update_data: 'MaterialUpdate' = ...,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    """
+    Обновление материала.
+    
+    Позволяет изменить название материала и/или переместить его в другой курс.
+    """
+    from app.schemas.swagger_schemas import MaterialUpdate
+    
+    # Validate UUID format
+    try:
+        material_uuid = uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid UUID format: {id}"
+        )
+    
+    material = db.query(MaterialModel).filter(
+        MaterialModel.id == material_uuid,
+        MaterialModel.user_id == current_user.id
+    ).first()
+    
+    if not material:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Material not found"
+        )
+    
+    # Update fields if provided
+    if update_data.title is not None:
+        material.title = update_data.title
+    
+    if update_data.course_id is not None:
+        # Verify course belongs to user
+        from app.models.models import Course
+        course = db.query(Course).filter(
+            Course.id == update_data.course_id,
+            Course.user_id == current_user.id
+        ).first()
+        
+        if not course:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Course not found"
+            )
+        
+        material.course_id = update_data.course_id
+    
+    db.commit()
+    db.refresh(material)
+    
+    return Material(
+        id=str(material.id),
+        title=material.title,
+        content=material.content or material.raw_text,
+        uploadDate=material.upload_date.isoformat() if material.upload_date else material.created_at.isoformat(),
+        status=material.status
+    )
+
+
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_material(
+    id: str = Path(..., description="Material ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    """
+    Удаление материала.
+    
+    Также удаляются все связанные тесты и результаты студентов.
+    """
+    # Validate UUID format
+    try:
+        material_uuid = uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid UUID format: {id}"
+        )
+    
+    material = db.query(MaterialModel).filter(
+        MaterialModel.id == material_uuid,
+        MaterialModel.user_id == current_user.id
+    ).first()
+    
+    if not material:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Material not found"
+        )
+    
+    # Delete material (cascade will delete related quizzes and results)
+    db.delete(material)
+    db.commit()
+    
+    return None
+

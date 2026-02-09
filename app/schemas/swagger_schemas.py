@@ -104,6 +104,40 @@ class LoginResponse(BaseModel):
     user: User
 
 
+# ===== Course Schemas =====
+
+class CourseBase(BaseModel):
+    """Base course schema."""
+    title: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+    color: Optional[str] = Field("#3b82f6", pattern="^#[0-9A-Fa-f]{6}$")
+    icon: Optional[str] = Field("school", max_length=50)
+
+
+class CourseCreate(CourseBase):
+    """Schema for creating a new course."""
+    pass
+
+
+class CourseUpdate(BaseModel):
+    """Schema for updating a course."""
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+    color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$")
+    icon: Optional[str] = Field(None, max_length=50)
+
+
+class CourseResponse(CourseBase):
+    """Complete course response with metadata."""
+    id: UUID4
+    materialsCount: int = 0
+    createdAt: datetime
+    updatedAt: datetime
+    
+    class Config:
+        from_attributes = True
+
+
 # ===== AI Engine Schemas =====
 
 class QuizConfig(BaseModel):
@@ -318,6 +352,12 @@ class MaterialUploadResponse(BaseModel):
     id: UUID4
     status: MaterialStatus
     message: str = Field(default="Processing started")
+
+
+class MaterialUpdate(BaseModel):
+    """Schema for updating a material."""
+    title: Optional[str] = Field(None, min_length=1, max_length=500)
+    course_id: Optional[UUID4] = None
 
 
 # ===== Share Schemas =====

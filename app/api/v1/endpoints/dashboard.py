@@ -4,6 +4,7 @@ Provides aggregated data for teacher's main screen.
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from typing import Optional
 from app.core.database import get_db
 from app.api.dependencies import get_current_teacher
 from app.models.models import User
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 @router.get("/overview", response_model=DashboardData)
 async def get_dashboard_overview(
-    courseId: str = Query(..., description="Course ID to filter data"),
+    courseId: Optional[str] = Query(None, description="Course ID to filter data (optional)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_teacher)
 ):
