@@ -1,14 +1,48 @@
 from typing import Optional, Dict, List
 import json
-from openai import OpenAI
+import re
+import google.generativeai as genai
 from app.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def extract_json_from_response(text: str) -> str:
+    """
+    Extract JSON from Gemini response, removing markdown code blocks.
+    Handles cases like ```json ... ``` or plain text with JSON.
+    """
+    if not text:
+        raise ValueError("Empty response from AI")
+    
+    # Remove markdown code blocks
+    text = text.strip()
+    
+    # Try to extract JSON from markdown code block
+    json_match = re.search(r'```(?:json)?\s*(\[[\s\S]*?\]|\{[\s\S]*?\})\s*```', text)
+    if json_match:
+        return json_match.group(1)
+    
+    # Try to find JSON array or object in the text
+    json_match = re.search(r'(\[[\s\S]*\]|\{[\s\S]*\})', text)
+    if json_match:
+        return json_match.group(1)
+    
+    return text
 
 
 class AIService:
-    """Service for AI-powered content generation using OpenAI."""
+    """Service for AI-powered content generation using Google Gemini."""
     
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+        if settings.GEMINI_API_KEY:
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            self.model = genai.GenerativeModel(settings.GEMINI_MODEL)
+            self.client = True
+        else:
+            self.client = None
+            self.model = None
     
     async def generate_summary(self, text: str) -> Dict[str, any]:
         """
@@ -29,7 +63,9 @@ class AIService:
 
 Если текст не содержит учебного материала, установи is_educational: false.
 
-Верни ответ строго в формате JSON:
+ВАЖНО: Верни ТОЛЬКО JSON без дополнительного текста, объяснений или markdown форматирования.
+
+Формат JSON:
 {
     "is_educational": true/false,
     "summary": "текст конспекта",
@@ -40,19 +76,23 @@ class AIService:
 """ + text[:4000]  # Limit text length
         
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "Ты опытный методист, создающий учебные материалы."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=1500
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=1500,
+                )
             )
             
-            result = json.loads(response.choices[0].message.content)
+            logger.info(f"AI Summary Response: {response.text[:200]}...")
+            clean_json = extract_json_from_response(response.text)
+            result = json.loads(clean_json)
             return result
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in summary: {e}. Response: {response.text[:500]}")
+            raise ValueError(f"Failed to parse AI response as JSON: {str(e)}")
         except Exception as e:
+            logger.error(f"Summary generation error: {e}")
             raise ValueError(f"Failed to generate summary: {str(e)}")
     
     async def generate_quiz(
@@ -90,7 +130,9 @@ class AIService:
 - Для MCQ предоставь 4 варианта ответа
 - Укажи правильный ответ для каждого вопроса
 
-Верни ответ строго в формате JSON массива:
+ВАЖНО: Верни ТОЛЬКО JSON массив без дополнительного текста, объяснений или markdown блоков.
+
+Формат JSON массива:
 [
     {{
         "question": "текст вопроса",
@@ -110,19 +152,23 @@ class AIService:
 """ + text[:4000]
         
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "Ты опытный методист, создающий тесты."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=2000
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=2000,
+                )
             )
             
-            result = json.loads(response.choices[0].message.content)
+            logger.info(f"AI Quiz Response: {response.text[:200]}...")
+            clean_json = extract_json_from_response(response.text)
+            result = json.loads(clean_json)
             return result
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in quiz: {e}. Response: {response.text[:500]}")
+            raise ValueError(f"Failed to parse AI response as JSON: {str(e)}")
         except Exception as e:
+            logger.error(f"Quiz generation error: {e}")
             raise ValueError(f"Failed to generate quiz: {str(e)}")
     
     async def generate_quiz_advanced(
@@ -173,7 +219,9 @@ class AIService:
 Для каждого вопроса ОБЯЗАТЕЛЬНО добавь методическое пояснение (explanation), 
 почему данный ответ является верным. Это критично для режима 'Презентация' и печати ключей.
 
-Верни ответ строго в формате JSON массива:
+ВАЖНО: Верни ТОЛЬКО JSON массив без дополнительного текста, объяснений или markdown блоков.
+
+Формат JSON массива:
 [
     {{
         "text": "текст вопроса",
@@ -188,22 +236,25 @@ class AIService:
 """ + text[:4000]
         
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "Ты опытный методист с глубоким пониманием педагогики."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=3000,
-                timeout=30  # 30 second timeout
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=3000,
+                )
             )
             
-            result = json.loads(response.choices[0].message.content)
+            logger.info(f"AI Advanced Quiz Response: {response.text[:200]}...")
+            clean_json = extract_json_from_response(response.text)
+            result = json.loads(clean_json)
             return result
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in advanced quiz: {e}. Response: {response.text[:500]}")
+            raise ValueError(f"Failed to parse AI response as JSON: {str(e)}")
         except TimeoutError:
             raise TimeoutError("Quiz generation timeout")
         except Exception as e:
+            logger.error(f"Advanced quiz generation error: {e}")
             raise ValueError(f"Failed to generate quiz: {str(e)}")
     
     async def chat_with_context(self, message: str, context: str = "") -> str:
@@ -218,17 +269,16 @@ class AIService:
             system_prompt += f"\n\nКонтекст из материала:\n{context}"
         
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message}
-                ],
-                temperature=0.7,
-                max_tokens=1000
+            full_prompt = system_prompt + "\n\n" + message
+            response = self.model.generate_content(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=1000,
+                )
             )
             
-            return response.choices[0].message.content
+            return response.text
         except Exception as e:
             raise ValueError(f"Chat failed: {str(e)}")
     
@@ -258,17 +308,16 @@ class AIService:
         prompt += f"Текст: {text}"
         
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "Ты опытный педагог."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=500
+            full_prompt = "Ты опытный педагог.\n\n" + prompt
+            response = self.model.generate_content(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=500,
+                )
             )
             
-            return response.choices[0].message.content
+            return response.text
         except Exception as e:
             raise ValueError(f"Smart action failed: {str(e)}")
     
@@ -310,19 +359,24 @@ class AIService:
 """
         
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "Ты опытный методист."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=500
+            full_prompt = "Ты опытный методист.\n\n" + prompt
+            response = self.model.generate_content(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.8,
+                    max_output_tokens=500,
+                )
             )
             
-            result = json.loads(response.choices[0].message.content)
+            logger.info(f"AI Regenerate Response: {response.text[:200]}...")
+            clean_json = extract_json_from_response(response.text)
+            result = json.loads(clean_json)
             return result
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in regenerate: {e}. Response: {response.text[:500]}")
+            raise ValueError(f"Failed to parse AI response as JSON: {str(e)}")
         except Exception as e:
+            logger.error(f"Regeneration error: {e}")
             raise ValueError(f"Regeneration failed: {str(e)}")
 
 
