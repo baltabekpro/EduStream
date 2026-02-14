@@ -31,6 +31,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI Engine"])
 
 
+def _normalize_question_type(raw_type: str) -> QuestionType:
+    value = (raw_type or "mcq").strip().lower()
+    aliases = {
+        "mcq": "mcq",
+        "multiple_choice": "mcq",
+        "multiple-choice": "mcq",
+        "choice": "mcq",
+        "open": "open",
+        "open-ended": "open",
+        "open_ended": "open",
+        "boolean": "boolean",
+        "true_false": "boolean",
+        "true-false": "boolean",
+    }
+    normalized = aliases.get(value, "mcq")
+    return QuestionType(normalized)
+
+
 @router.get("/templates", response_model=list[QuizTemplate])
 async def get_quiz_templates(
     current_user: User = Depends(get_current_teacher)
@@ -347,6 +365,12 @@ async def generate_quiz(
             )
             if inspect.isawaitable(questions_data):
                 questions_data = await questions_data
+
+        if isinstance(questions_data, dict) and "questions" in questions_data:
+            questions_data = questions_data.get("questions", [])
+
+        if not isinstance(questions_data, list):
+            raise ValueError("AI returned invalid quiz format")
         
         # Create quiz record
         quiz = QuizModel(
@@ -359,17 +383,29 @@ async def generate_quiz(
         db.refresh(quiz)
         
         # Convert to response format
-        questions = [
-            Question(
-                id=uuid.uuid4(),
-                type=QuestionType(str(q.get("type", question_type)).lower()),
-                text=q.get("text") or q.get("question", ""),
-                options=q.get("options"),
-                correctAnswer=q.get("correctAnswer") or q.get("correct_answer", ""),
-                explanation=q.get("explanation")
+        questions = []
+        for q in questions_data:
+            if not isinstance(q, dict):
+                continue
+
+            text_value = q.get("text") or q.get("question", "")
+            answer_value = q.get("correctAnswer") or q.get("correct_answer", "")
+            if not text_value or not answer_value:
+                continue
+
+            questions.append(
+                Question(
+                    id=uuid.uuid4(),
+                    type=_normalize_question_type(str(q.get("type", question_type))),
+                    text=text_value,
+                    options=q.get("options"),
+                    correctAnswer=answer_value,
+                    explanation=q.get("explanation")
+                )
             )
-            for q in questions_data
-        ]
+
+        if not questions:
+            raise ValueError("AI returned no valid questions")
         
         return Quiz(
             id=quiz.id,
@@ -387,6 +423,12 @@ async def generate_quiz(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+    except Exception as e:
+        logger.exception("Unexpected error during quiz generation")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate quiz: {str(e)}"
         )
 
 
