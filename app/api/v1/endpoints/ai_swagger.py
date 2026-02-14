@@ -17,7 +17,9 @@ from app.schemas.swagger_schemas import (
     SmartActionResponse,
     RegenerateBlockRequest,
     AISessionInfo,
-    QuestionType
+    QuestionType,
+    AssignmentGenerateRequest,
+    AssignmentGenerateResponse
 )
 from app.services.ai_service import ai_service
 from datetime import datetime
@@ -58,6 +60,35 @@ def _to_question_payload(question: dict, fallback_type: str = "mcq") -> Question
         correctAnswer=question.get("correctAnswer") or question.get("correct_answer", ""),
         explanation=question.get("explanation")
     )
+
+
+def _normalize_questions(incoming: list) -> list[dict]:
+    normalized = []
+    for question in incoming:
+        if not isinstance(question, dict):
+            continue
+        text_value = (question.get("text") or question.get("question") or "").strip()
+        answer_value = (question.get("correctAnswer") or question.get("correct_answer") or "").strip()
+        if not text_value or not answer_value:
+            continue
+
+        normalized.append({
+            "id": str(question.get("id") or uuid.uuid4()),
+            "type": _normalize_question_type(str(question.get("type", "mcq"))).value,
+            "text": text_value,
+            "options": question.get("options") or [],
+            "correctAnswer": answer_value,
+            "explanation": question.get("explanation") or ""
+        })
+
+    return normalized
+
+
+def _build_quiz_title(material: Material, explicit_title: str | None = None) -> str:
+    if explicit_title and explicit_title.strip():
+        return explicit_title.strip()[:255]
+    base_title = (material.title or "Материал").strip()
+    return f"Тест: {base_title}"[:255]
 
 
 @router.get("/templates", response_model=list[QuizTemplate])
@@ -236,8 +267,50 @@ async def ai_chat(
             message=request.message,
             context=context
         )
+
+        session = None
+        if request.sessionId is not None:
+            session = db.query(AISession).filter(
+                AISession.id == request.sessionId,
+                AISession.user_id == current_user.id
+            ).first()
+
+        if not session:
+            session = AISession(
+                user_id=current_user.id,
+                title=(request.message.strip()[:80] or "Новый чат"),
+                doc_id=material_uuid if request.materialId else None,
+                date=datetime.utcnow(),
+                messages=[]
+            )
+            db.add(session)
+            db.flush()
+
+        existing_messages = session.messages or []
+        if not isinstance(existing_messages, list):
+            existing_messages = []
+
+        existing_messages.append({
+            "id": int(datetime.utcnow().timestamp() * 1000),
+            "type": "user",
+            "text": request.message,
+            "createdAt": datetime.utcnow().isoformat()
+        })
+        existing_messages.append({
+            "id": int(datetime.utcnow().timestamp() * 1000) + 1,
+            "type": "ai",
+            "text": response,
+            "createdAt": datetime.utcnow().isoformat()
+        })
+
+        session.messages = existing_messages
+        if request.materialId:
+            session.doc_id = material_uuid
+        session.date = datetime.utcnow()
+        db.commit()
+        db.refresh(session)
         
-        return {"response": response}
+        return {"response": response, "sessionId": session.id}
         
     except Exception as e:
         raise HTTPException(
@@ -304,6 +377,7 @@ async def get_quiz_by_id(
     return Quiz(
         id=quiz.id,
         materialId=quiz.material_id,
+        title=quiz.title,
         questions=questions,
         createdAt=quiz.created_at
     )
@@ -330,39 +404,76 @@ async def update_quiz_by_id(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
 
     incoming = payload.get("questions")
+    title = payload.get("title")
     if not isinstance(incoming, list) or not incoming:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="questions must be a non-empty list")
 
-    normalized = []
-    for question in incoming:
-        if not isinstance(question, dict):
-            continue
-        text_value = (question.get("text") or question.get("question") or "").strip()
-        answer_value = (question.get("correctAnswer") or question.get("correct_answer") or "").strip()
-        if not text_value or not answer_value:
-            continue
-
-        normalized.append({
-            "id": str(question.get("id") or uuid.uuid4()),
-            "type": _normalize_question_type(str(question.get("type", "mcq"))).value,
-            "text": text_value,
-            "options": question.get("options") or [],
-            "correctAnswer": answer_value,
-            "explanation": question.get("explanation") or ""
-        })
+    normalized = _normalize_questions(incoming)
 
     if not normalized:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No valid questions provided")
 
     quiz.questions = normalized
+    if title is not None:
+        quiz.title = str(title).strip()[:255] if str(title).strip() else quiz.title
     db.commit()
     db.refresh(quiz)
 
     return Quiz(
         id=quiz.id,
         materialId=quiz.material_id,
+        title=quiz.title,
         questions=[_to_question_payload(q) for q in normalized],
         createdAt=quiz.created_at
+    )
+
+
+@router.post("/quizzes", response_model=Quiz, status_code=status.HTTP_201_CREATED)
+async def create_quiz_from_draft(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    material_id = payload.get("materialId")
+    incoming = payload.get("questions")
+    title = payload.get("title")
+
+    if not material_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="materialId is required")
+    if not isinstance(incoming, list) or not incoming:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="questions must be a non-empty list")
+
+    try:
+        material_uuid = uuid.UUID(str(material_id))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid material id")
+
+    material = db.query(Material).filter(
+        Material.id == material_uuid,
+        Material.user_id == current_user.id
+    ).first()
+    if not material:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
+
+    normalized = _normalize_questions(incoming)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No valid questions provided")
+
+    quiz = QuizModel(
+        material_id=material_uuid,
+        title=_build_quiz_title(material, str(title) if title is not None else None),
+        questions=normalized,
+    )
+    db.add(quiz)
+    db.commit()
+    db.refresh(quiz)
+
+    return Quiz(
+        id=quiz.id,
+        materialId=quiz.material_id,
+        title=quiz.title,
+        questions=[_to_question_payload(q) for q in normalized],
+        createdAt=quiz.created_at,
     )
 
 
@@ -530,6 +641,7 @@ async def generate_quiz(
         # Create quiz record
         quiz = QuizModel(
             material_id=material.id,
+            title=_build_quiz_title(material),
             questions=normalized_for_storage
         )
 
@@ -540,6 +652,7 @@ async def generate_quiz(
         return Quiz(
             id=quiz.id,
             materialId=material.id,
+            title=quiz.title,
             questions=questions,
             createdAt=quiz.created_at
         )
@@ -559,6 +672,47 @@ async def generate_quiz(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate quiz: {str(e)}"
+        )
+
+
+@router.post("/generate-assignment", response_model=AssignmentGenerateResponse)
+async def generate_assignment(
+    payload: AssignmentGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    try:
+        material_uuid = uuid.UUID(str(payload.materialId))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid materialId format")
+
+    material = db.query(Material).filter(
+        Material.id == material_uuid,
+        Material.user_id == current_user.id
+    ).first()
+
+    if not material:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
+
+    content = (material.content or material.raw_text or "").strip()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Material has no text content")
+
+    try:
+        assignment_text = await ai_service.generate_assignment(content, payload.instruction or "")
+        material.summary = assignment_text
+        db.commit()
+        db.refresh(material)
+
+        return AssignmentGenerateResponse(
+            materialId=material.id,
+            title=material.title,
+            assignmentText=assignment_text,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate assignment: {str(e)}"
         )
 
 
@@ -623,3 +777,26 @@ async def get_ai_sessions(
         )
         for session in sessions
     ]
+
+
+@router.get("/sessions/{session_id}")
+async def get_ai_session_by_id(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    session = db.query(AISession).filter(
+        AISession.id == session_id,
+        AISession.user_id == current_user.id
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    return {
+        "id": session.id,
+        "title": session.title,
+        "date": session.date.isoformat() if session.date else None,
+        "docId": str(session.doc_id) if session.doc_id else None,
+        "messages": session.messages or []
+    }

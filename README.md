@@ -23,7 +23,7 @@ EduStream is a powerful backend API for a virtual teaching assistant platform th
 - **Authentication**: JWT with bcrypt password hashing
 - **AI Integration**: OpenAI API (GPT-3.5-turbo)
 - **OCR**: Tesseract OCR with Russian and English support
-- **File Processing**: PyPDF2, python-docx
+- **File Processing**: pypdf, python-docx
 - **Testing**: Pytest with async support
 - **Containerization**: Docker & Docker Compose
 
@@ -206,6 +206,13 @@ OPENAI_API_KEY=your-openai-api-key
 HOST=0.0.0.0
 PORT=8000
 DEBUG=True
+
+# Upload limits and public frontend URL for share links
+MAX_UPLOAD_SIZE=10485760
+FRONTEND_BASE_URL=https://edu-stream-mu.vercel.app
+
+# CORS
+CORS_ORIGINS=http://localhost:3000,http://localhost:8000
 ```
 
 ## 🧪 Testing

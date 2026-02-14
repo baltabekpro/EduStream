@@ -24,8 +24,10 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     """Register a new user (teacher, admin, or student)."""
+    normalized_email = user_data.email.strip().lower()
+
     # Check if user already exists
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    existing_user = db.query(User).filter(User.email == normalized_email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -34,7 +36,7 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     
     # Create new user with firstName and lastName from request
     new_user = User(
-        email=user_data.email,
+        email=normalized_email,
         password_hash=get_password_hash(user_data.password),
         first_name=user_data.firstName,
         last_name=user_data.lastName,
@@ -55,8 +57,10 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     
     Returns token and user object as per Swagger spec.
     """
+    normalized_email = user_data.email.strip().lower()
+
     # Find user
-    user = db.query(User).filter(User.email == user_data.email).first()
+    user = db.query(User).filter(User.email == normalized_email).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

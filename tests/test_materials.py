@@ -27,6 +27,28 @@ def auth_token(client: TestClient):
     return response.json()["access_token"]
 
 
+@pytest.fixture
+def student_token(client: TestClient):
+    """Get authentication token for student."""
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "student_materials@test.com",
+            "password": "StudentPass123",
+            "role": "student"
+        }
+    )
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "student_materials@test.com",
+            "password": "StudentPass123"
+        }
+    )
+    return response.json()["access_token"]
+
+
 def test_upload_material_unauthorized(client: TestClient):
     """Test material upload without authentication."""
     # Create a fake PDF file
@@ -55,3 +77,12 @@ def test_get_nonexistent_material(client: TestClient, auth_token: str):
         headers={"Authorization": f"Bearer {auth_token}"}
     )
     assert response.status_code == 404
+
+
+def test_materials_forbidden_for_student(client: TestClient, student_token: str):
+    """Student should not access teacher materials endpoints."""
+    response = client.get(
+        "/api/v1/materials/",
+        headers={"Authorization": f"Bearer {student_token}"}
+    )
+    assert response.status_code == 403

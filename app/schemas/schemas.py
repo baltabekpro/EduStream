@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, UUID4, field_validator
+from pydantic import BaseModel, EmailStr, Field, UUID4, field_validator, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -54,8 +54,7 @@ class UserResponse(BaseModel):
     role: UserRole
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Material Schemas
@@ -73,8 +72,7 @@ class MaterialResponse(BaseModel):
     file_url: Optional[str] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # AI Schemas

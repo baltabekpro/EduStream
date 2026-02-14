@@ -2,7 +2,7 @@
 Pydantic schemas aligned with swagger.yml specification.
 All schemas strictly follow the Swagger contract.
 """
-from pydantic import BaseModel, EmailStr, Field, UUID4, field_validator
+from pydantic import BaseModel, EmailStr, Field, UUID4, field_validator, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -63,8 +63,8 @@ class StudentTrend(str, Enum):
 
 class ErrorResponse(BaseModel):
     """Standard error response format."""
-    code: int = Field(..., example=422)
-    message: str = Field(..., example="Validation Error")
+    code: int = Field(..., json_schema_extra={"example": 422})
+    message: str = Field(..., json_schema_extra={"example": "Validation Error"})
     details: Optional[Dict[str, Any]] = Field(None, description="Error details by field")
 
 
@@ -89,8 +89,7 @@ class User(BaseModel):
     role: UserRole
     settings: Optional[UserSettings] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserLogin(BaseModel):
@@ -133,7 +132,7 @@ class Question(BaseModel):
     """Quiz question schema."""
     id: UUID4
     type: QuestionType
-    text: str = Field(..., example="Какова основная функция митохондрий?")
+    text: str = Field(..., json_schema_extra={"example": "Какова основная функция митохондрий?"})
     options: Optional[List[str]] = Field(None, description="Варианты ответов (только для MCQ)")
     correctAnswer: str
     explanation: Optional[str] = Field(
@@ -146,26 +145,27 @@ class Quiz(BaseModel):
     """Complete quiz schema."""
     id: UUID4
     materialId: UUID4
+    title: Optional[str] = None
     questions: List[Question]
     createdAt: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class QuizTemplate(BaseModel):
     """Quiz template for gallery."""
     id: int
-    title: str = Field(..., example="Входное тестирование")
-    desc: str = Field(..., example="15 вопросов для оценки базовых знаний")
-    icon: str = Field(..., example="login")
-    color: str = Field(..., example="blue")
+    title: str = Field(..., json_schema_extra={"example": "Входное тестирование"})
+    desc: str = Field(..., json_schema_extra={"example": "15 вопросов для оценки базовых знаний"})
+    icon: str = Field(..., json_schema_extra={"example": "login"})
+    color: str = Field(..., json_schema_extra={"example": "blue"})
     config: QuizConfig
 
 
 class ChatRequest(BaseModel):
     """AI chat request."""
     materialId: Optional[str] = None
+    sessionId: Optional[int] = None
     message: str
 
 
@@ -185,7 +185,7 @@ class RegenerateBlockRequest(BaseModel):
     """Request to regenerate a single block."""
     blockId: str
     currentText: str
-    instruction: Optional[str] = Field(None, example="Сделай вопрос сложнее")
+    instruction: Optional[str] = Field(None, json_schema_extra={"example": "Сделай вопрос сложнее"})
 
 
 class AISessionInfo(BaseModel):
@@ -201,7 +201,7 @@ class AISessionInfo(BaseModel):
 class OCRRegion(BaseModel):
     """OCR region with recognition results."""
     id: str
-    label: str = Field(..., example="Вопрос 1")
+    label: str = Field(..., json_schema_extra={"example": "Вопрос 1"})
     original: Optional[str] = Field(None, description="Исходный текст вопроса из базы заданий")
     ocrText: str = Field(..., description="Текст, распознанный с рукописного ввода")
     confidence: OCRConfidence = Field(..., description="Флаг для UI: если Low, слово подчеркивается желтым")
@@ -263,11 +263,19 @@ class RecentActivityItem(BaseModel):
     action: str
 
 
+class DashboardStats(BaseModel):
+    needsReviewCount: int = 0
+    averageScore: float = 0.0
+    studentsCount: int = 0
+    submissionsCount: int = 0
+
+
 class DashboardData(BaseModel):
     """Dashboard overview data."""
     pieChart: List[PieChartItem]
     needsReview: List[NeedsReviewItem]
     recentActivity: List[RecentActivityItem]
+    stats: Optional[DashboardStats] = None
 
 
 # ===== Analytics Schemas =====
@@ -334,11 +342,12 @@ class Material(BaseModel):
     id: str
     title: str
     content: Optional[str] = None
+    summary: Optional[str] = None
+    courseId: Optional[str] = None
     uploadDate: str
     status: MaterialStatus
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MaterialUploadResponse(BaseModel):
@@ -346,6 +355,17 @@ class MaterialUploadResponse(BaseModel):
     id: UUID4
     status: MaterialStatus
     message: str = Field(default="Processing started")
+
+
+class AssignmentGenerateRequest(BaseModel):
+    materialId: UUID4
+    instruction: Optional[str] = Field(default="", description="Дополнительные пожелания к заданию")
+
+
+class AssignmentGenerateResponse(BaseModel):
+    materialId: UUID4
+    title: str
+    assignmentText: str
 
 
 # ===== Share Schemas =====
@@ -371,4 +391,5 @@ class UserUpdateRequest(BaseModel):
     """User profile update request."""
     firstName: Optional[str] = None
     lastName: Optional[str] = None
+    avatar: Optional[str] = None
     settings: Optional[UserSettings] = None

@@ -89,6 +89,9 @@ curl -H "Authorization: Bearer eyJhbGc..." \
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/share/create` | Create public sharing link |
+| GET | `/share/{shortCode}` | Public shared resource payload (quiz/material) |
+| POST | `/share/{shortCode}/submit` | Public quiz submission |
+| POST | `/share/{shortCode}/upload` | Public assignment file upload |
 
 ## Common Request Examples
 
@@ -220,6 +223,13 @@ OPENAI_API_KEY=sk-...
 HOST=0.0.0.0
 PORT=8000
 DEBUG=True
+
+# Uploads and public share links
+MAX_UPLOAD_SIZE=10485760
+FRONTEND_BASE_URL=https://edu-stream-mu.vercel.app
+
+# CORS
+CORS_ORIGINS=http://localhost:3000,http://localhost:8000
 ```
 
 ## Database Migration

@@ -4,7 +4,7 @@ User profile endpoints.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.dependencies import get_current_teacher
+from app.api.dependencies import get_current_user
 from app.models.models import User as UserModel
 from app.schemas.swagger_schemas import User, UserUpdateRequest
 from app.core.security import verify_password, get_password_hash
@@ -27,7 +27,7 @@ def _swagger_user(current_user: UserModel) -> User:
 @router.get("/me", response_model=User)
 async def get_user_profile(
     db: Session = Depends(get_db),
-    current_user: UserModel = Depends(get_current_teacher)
+    current_user: UserModel = Depends(get_current_user)
 ):
     """Get current user profile."""
     return _swagger_user(current_user)
@@ -37,7 +37,7 @@ async def get_user_profile(
 async def update_user_profile(
     update_data: UserUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: UserModel = Depends(get_current_teacher)
+    current_user: UserModel = Depends(get_current_user)
 ):
     """
     Обновление настроек профиля.
@@ -49,6 +49,9 @@ async def update_user_profile(
     
     if update_data.lastName is not None:
         current_user.last_name = update_data.lastName
+
+    if update_data.avatar is not None:
+        current_user.avatar = update_data.avatar
     
     if update_data.settings is not None:
         current_user.settings = update_data.settings.dict()
@@ -63,7 +66,7 @@ async def update_user_profile(
 async def update_user_profile_legacy(
     update_data: dict,
     db: Session = Depends(get_db),
-    current_user: UserModel = Depends(get_current_teacher)
+    current_user: UserModel = Depends(get_current_user)
 ):
     """Legacy profile update format used by tests/older clients."""
     if "first_name" in update_data:
@@ -94,7 +97,7 @@ async def update_user_profile_legacy(
 async def change_password_legacy(
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: UserModel = Depends(get_current_teacher)
+    current_user: UserModel = Depends(get_current_user)
 ):
     """Legacy password change endpoint."""
     current_password = payload.get("current_password")
@@ -120,7 +123,7 @@ async def change_password_legacy(
 @router.delete("/me")
 async def delete_current_user_legacy(
     db: Session = Depends(get_db),
-    current_user: UserModel = Depends(get_current_teacher)
+    current_user: UserModel = Depends(get_current_user)
 ):
     """Legacy delete-account endpoint."""
     db.delete(current_user)

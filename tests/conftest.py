@@ -1,9 +1,22 @@
 import pytest
+import inspect
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.core.database import Base, get_db
+
+
+# Compatibility shim: Starlette TestClient passes `app=` into httpx.Client.
+# httpx>=0.28 removed this parameter, which breaks tests at runtime.
+if "app" not in inspect.signature(httpx.Client.__init__).parameters:
+    _original_httpx_client_init = httpx.Client.__init__
+
+    def _patched_httpx_client_init(self, *args, app=None, **kwargs):
+        return _original_httpx_client_init(self, *args, **kwargs)
+
+    httpx.Client.__init__ = _patched_httpx_client_init
 
 # Use in-memory SQLite for tests
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"

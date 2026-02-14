@@ -96,9 +96,27 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
+    courses = relationship("Course", back_populates="owner", cascade="all, delete-orphan")
     materials = relationship("Material", back_populates="owner", cascade="all, delete-orphan")
     student_results = relationship("StudentResult", back_populates="teacher", cascade="all, delete-orphan")
     ai_sessions = relationship("AISession", back_populates="user", cascade="all, delete-orphan")
+
+
+class Course(Base):
+    """Course entity for organizing materials."""
+    __tablename__ = "courses"
+
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(), ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    color = Column(String, nullable=True)
+    icon = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    owner = relationship("User", back_populates="courses")
+    materials = relationship("Material", back_populates="course")
 
 
 class Material(Base):
@@ -115,11 +133,12 @@ class Material(Base):
     file_url = Column(String, nullable=True)
     upload_date = Column(DateTime, default=datetime.utcnow, nullable=False)
     status = Column(Enum(MaterialStatus), default=MaterialStatus.PROCESSING, nullable=False)
-    course_id = Column(String, nullable=True)  # For filtering by course
+    course_id = Column(String, ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
     owner = relationship("User", back_populates="materials")
+    course = relationship("Course", back_populates="materials")
     quizzes = relationship("Quiz", back_populates="material", cascade="all, delete-orphan")
 
 
@@ -129,6 +148,7 @@ class Quiz(Base):
     
     id = Column(UUID(), primary_key=True, default=uuid.uuid4)
     material_id = Column(UUID(), ForeignKey("materials.id"), nullable=False)
+    title = Column(String, nullable=True)
     questions = Column(JSON, nullable=False)  # [{question, type, options, correct_answer}]
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     

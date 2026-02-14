@@ -1,10 +1,11 @@
 import os
 import logging
 from typing import Optional
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from docx import Document
 from fastapi import UploadFile
 from app.core.config import settings
+from app.services.ocr_service import ocr_service
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ class FileProcessor:
         
         with open(destination, "wb") as buffer:
             content = await upload_file.read()
+            if len(content) > settings.MAX_UPLOAD_SIZE:
+                raise ValueError(f"File is too large. Max size is {settings.MAX_UPLOAD_SIZE} bytes")
             buffer.write(content)
         
         return destination
@@ -79,8 +82,10 @@ class FileProcessor:
                 return await self.extract_text_from_docx(file_path)
             elif file_extension == ".txt":
                 return await self.extract_text_from_txt(file_path)
+            elif file_extension in [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"]:
+                return await ocr_service.extract_text_from_image(file_path)
             else:
-                raise ValueError(f"Unsupported file type: {file_extension}. Supported: .pdf, .docx, .txt")
+                raise ValueError(f"Unsupported file type: {file_extension}. Supported: .pdf, .docx, .txt, images")
         except Exception as e:
             logger.error(f"Error extracting text from {file_path}: {str(e)}")
             raise
@@ -147,8 +152,8 @@ async def process_uploaded_file(upload_file: UploadFile) -> tuple[str, str]:
     """
     # Validate file extension
     file_extension = os.path.splitext(upload_file.filename)[1].lower()
-    if file_extension not in [".pdf", ".docx", ".txt"]:
-        raise ValueError("Only PDF, DOCX, and TXT files are supported")
+    if file_extension not in [".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"]:
+        raise ValueError("Only PDF, DOCX, TXT, and image files are supported")
     
     # Save file
     upload_dir = settings.UPLOAD_DIR
@@ -165,6 +170,8 @@ async def process_uploaded_file(upload_file: UploadFile) -> tuple[str, str]:
         text = await extract_text_from_docx(file_path)
     elif file_extension == ".txt":
         text = await extract_text_from_txt(file_path)
+    elif file_extension in [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"]:
+        text = await ocr_service.extract_text_from_image(file_path)
     else:
         raise ValueError("Unsupported file type")
     

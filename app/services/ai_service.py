@@ -379,6 +379,49 @@ class AIService:
             logger.error(f"Regeneration error: {e}")
             raise ValueError(f"Regeneration failed: {str(e)}")
 
+    async def generate_assignment(
+        self,
+        text: str,
+        instruction: str = ""
+    ) -> str:
+        """
+        Generate assignment text based on educational material.
+        """
+        if not self.client:
+            return (
+                "1) Прочитайте материал и выделите 3 ключевые идеи.\n"
+                "2) Ответьте письменно на 2 вопроса по теме.\n"
+                "3) Подготовьте краткий вывод (5-7 предложений)."
+            )
+
+        prompt = (
+            "Ты опытный преподаватель. Составь задание для учеников по материалу ниже.\n"
+            "Требования:\n"
+            "- Чёткая структура шагов\n"
+            "- Понятные критерии результата\n"
+            "- Подходит для отправки учеником текста и/или файла\n"
+            "- Пиши на русском языке\n"
+            "- Верни только чистый текст задания без markdown и без лишних вступлений\n\n"
+            f"Дополнительная инструкция учителя: {instruction or 'нет'}\n\n"
+            f"Материал:\n{text[:4500]}"
+        )
+
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=1200,
+                )
+            )
+            result = (response.text or "").strip()
+            if not result:
+                raise ValueError("AI returned empty assignment text")
+            return result
+        except Exception as e:
+            logger.error(f"Assignment generation error: {e}")
+            raise ValueError(f"Failed to generate assignment: {str(e)}")
+
 
 # Global instance
 ai_service = AIService()
