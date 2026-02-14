@@ -305,6 +305,30 @@ class AnalyticsData(BaseModel):
 
 # ===== Material Schemas =====
 
+class CourseCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class CourseUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class Course(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    materialsCount: int = 0
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
+
 class Material(BaseModel):
     """Material schema matching Swagger."""
     id: str
