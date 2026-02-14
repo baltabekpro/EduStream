@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
+import os
 from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.api.v1.router import api_router
@@ -29,7 +30,18 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Startup
     logger.info("Starting EduStream API...")
-    Base.metadata.create_all(bind=engine)
+
+    # During tests we use an isolated SQLite engine from tests/conftest.py.
+    # Avoid touching the configured DB (often Postgres) on startup.
+    is_pytest = (
+        "PYTEST_CURRENT_TEST" in os.environ
+        or os.environ.get("EDUSTREAM_TESTING") == "1"
+        or "pytest" in sys.modules
+    )
+    if not is_pytest:
+        Base.metadata.create_all(bind=engine)
+    else:
+        logger.info("Skipping DB initialization on startup (testing mode)")
     logger.info(f"Documentation available at: http://{settings.HOST}:{settings.PORT}/docs")
     
     yield

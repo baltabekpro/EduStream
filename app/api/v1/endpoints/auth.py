@@ -32,20 +32,12 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
     
-    # Parse name into first_name and last_name if provided
-    first_name = None
-    last_name = None
-    if user_data.name:
-        name_parts = user_data.name.strip().split(maxsplit=1)
-        first_name = name_parts[0] if len(name_parts) > 0 else None
-        last_name = name_parts[1] if len(name_parts) > 1 else None
-    
-    # Create new user
+    # Create new user with firstName and lastName from request
     new_user = User(
         email=user_data.email,
         password_hash=get_password_hash(user_data.password),
-        first_name=first_name,
-        last_name=last_name,
+        first_name=user_data.firstName,
+        last_name=user_data.lastName,
         role=user_data.role
     )
     
@@ -80,6 +72,7 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     
     # Create tokens
     access_token = create_access_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
     
     # Create user response
     user_response = UserSwagger(
@@ -93,6 +86,9 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     )
     
     return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
         token=access_token,
         user=user_response
     )

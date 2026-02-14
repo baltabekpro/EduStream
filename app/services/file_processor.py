@@ -1,9 +1,12 @@
 import os
+import logging
 from typing import Optional
 from PyPDF2 import PdfReader
 from docx import Document
 from fastapi import UploadFile
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class FileProcessor:
@@ -46,16 +49,41 @@ class FileProcessor:
         
         return destination
     
+    async def extract_text_from_txt(self, file_path: str) -> str:
+        """Extract text from TXT file."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+            return text.strip()
+        except UnicodeDecodeError:
+            # Try with different encoding
+            try:
+                with open(file_path, 'r', encoding='latin-1') as f:
+                    text = f.read()
+                return text.strip()
+            except Exception as e:
+                raise ValueError(f"Failed to extract text from TXT: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Failed to extract text from TXT: {str(e)}")
+    
     async def extract_text(self, file_path: str) -> str:
         """Extract text from file based on extension."""
         file_extension = os.path.splitext(file_path)[1].lower()
         
-        if file_extension == ".pdf":
-            return await self.extract_text_from_pdf(file_path)
-        elif file_extension == ".docx":
-            return await self.extract_text_from_docx(file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {file_extension}")
+        logger.info(f"Extracting text from {file_path} (extension: {file_extension})")
+        
+        try:
+            if file_extension == ".pdf":
+                return await self.extract_text_from_pdf(file_path)
+            elif file_extension == ".docx":
+                return await self.extract_text_from_docx(file_path)
+            elif file_extension == ".txt":
+                return await self.extract_text_from_txt(file_path)
+            else:
+                raise ValueError(f"Unsupported file type: {file_extension}. Supported: .pdf, .docx, .txt")
+        except Exception as e:
+            logger.error(f"Error extracting text from {file_path}: {str(e)}")
+            raise
 
 
 # Legacy functions for backward compatibility
@@ -94,6 +122,24 @@ async def save_upload_file(upload_file: UploadFile, destination: str) -> str:
     return destination
 
 
+async def extract_text_from_txt(file_path: str) -> str:
+    """Extract text from TXT file."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        return text.strip()
+    except UnicodeDecodeError:
+        # Try with different encoding
+        try:
+            with open(file_path, 'r', encoding='latin-1') as f:
+                text = f.read()
+            return text.strip()
+        except Exception as e:
+            raise ValueError(f"Failed to extract text from TXT: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Failed to extract text from TXT: {str(e)}")
+
+
 async def process_uploaded_file(upload_file: UploadFile) -> tuple[str, str]:
     """
     Process uploaded file and extract text.
@@ -101,8 +147,8 @@ async def process_uploaded_file(upload_file: UploadFile) -> tuple[str, str]:
     """
     # Validate file extension
     file_extension = os.path.splitext(upload_file.filename)[1].lower()
-    if file_extension not in [".pdf", ".docx"]:
-        raise ValueError("Only PDF and DOCX files are supported")
+    if file_extension not in [".pdf", ".docx", ".txt"]:
+        raise ValueError("Only PDF, DOCX, and TXT files are supported")
     
     # Save file
     upload_dir = settings.UPLOAD_DIR
@@ -112,13 +158,17 @@ async def process_uploaded_file(upload_file: UploadFile) -> tuple[str, str]:
     await save_upload_file(upload_file, file_path)
     
     # Extract text
+    logger.info(f"Processing file: {file_path}")
     if file_extension == ".pdf":
         text = await extract_text_from_pdf(file_path)
     elif file_extension == ".docx":
         text = await extract_text_from_docx(file_path)
+    elif file_extension == ".txt":
+        text = await extract_text_from_txt(file_path)
     else:
         raise ValueError("Unsupported file type")
     
+    logger.info(f"Extracted {len(text)} characters from {file_path}")
     return file_path, text
 
 

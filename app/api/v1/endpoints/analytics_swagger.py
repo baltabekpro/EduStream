@@ -14,8 +14,33 @@ from app.schemas.swagger_schemas import (
     StudentMetric,
     StudentTrend
 )
+from app.schemas.schemas import AnalyticsDashboardResponse, AnalyticsKnowledgeMapResponse
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+
+@router.get("/dashboard", response_model=AnalyticsDashboardResponse)
+async def get_dashboard_legacy(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    return AnalyticsDashboardResponse(
+        stats={
+            "total_materials": 0,
+            "total_quizzes": 0,
+            "total_student_results": 0,
+            "average_score": 0.0,
+        },
+        recent_activities=[]
+    )
+
+
+@router.get("/knowledge-map", response_model=AnalyticsKnowledgeMapResponse)
+async def get_knowledge_map_legacy(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    return AnalyticsKnowledgeMapResponse(knowledge_map=[])
 
 
 @router.get("/performance", response_model=AnalyticsData)

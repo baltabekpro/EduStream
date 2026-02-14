@@ -20,7 +20,8 @@ class QuestionType(str, Enum):
 class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=72, description="Password (8-72 characters)")
-    name: Optional[str] = Field(None, max_length=255, description="Full name or first name")
+    firstName: Optional[str] = Field(None, max_length=255, description="First name")
+    lastName: Optional[str] = Field(None, max_length=255, description="Last name")
     role: UserRole = UserRole.TEACHER
     
     @field_validator('role', mode='before')

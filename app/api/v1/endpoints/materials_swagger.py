@@ -11,6 +11,9 @@ from app.schemas.swagger_schemas import Material, MaterialUploadResponse
 from app.services.file_processor import file_processor
 import uuid
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/materials", tags=["Materials"])
 
@@ -42,6 +45,7 @@ async def list_materials(
 
 
 @router.post("/", response_model=MaterialUploadResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/upload", response_model=MaterialUploadResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_material(
     file: UploadFile = File(...),
     courseId: str = Form(None),
@@ -71,9 +75,12 @@ async def upload_material(
     # Start async processing
     # TODO: Implement background task for text extraction and vector embedding
     try:
+        logger.info(f"Processing material {material.id}: {file.filename}")
+        
         # Save file
         file_path = await file_processor.save_file(file, str(material.id))
         material.file_url = file_path
+        logger.info(f"File saved to {file_path}")
         
         # Extract text
         text = await file_processor.extract_text(file_path)
@@ -81,17 +88,28 @@ async def upload_material(
         material.raw_text = text
         material.status = MaterialStatus.READY
         
+        logger.info(f"Material {material.id} processed successfully. Extracted {len(text)} characters")
+        
         db.commit()
         db.refresh(material)
         
     except Exception as e:
+        error_msg = f"Error processing material: {str(e)}"
+        logger.error(f"Material {material.id}: {error_msg}")
         material.status = MaterialStatus.ERROR
         db.commit()
+        
+        # Return error details for debugging
+        return MaterialUploadResponse(
+            id=material.id,
+            status=MaterialStatus.ERROR,
+            message=error_msg
+        )
     
     return MaterialUploadResponse(
         id=material.id,
         status=material.status,
-        message="Processing started"
+        message=f"Material processed successfully. Extracted {len(material.content or '')} characters"
     )
 
 

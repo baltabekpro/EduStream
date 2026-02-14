@@ -39,6 +39,12 @@ venv.bak/
 .env
 .env.local
 
+# Secrets / Keys (never commit)
+ssh-key-*
+*.pem
+id_rsa*
+id_ed25519*
+
 # Database
 *.db
 *.sqlite3
@@ -56,6 +62,13 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local reports / scratch docs
+FINAL_REPORT.md
+TEACHER_SCENARIO.md
+TEACHER_TEST_REPORT.md
+TEST_TEACHER_FULL_SCENARIO.py
+UX_UI_ANALYSIS.md
 
 # Docker
 *.env.docker

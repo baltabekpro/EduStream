@@ -7,6 +7,10 @@ from app.core.config import settings
 
 class OCRService:
     """Service for OCR text recognition."""
+
+    async def extract_text_from_image(self, image_path: str) -> str:
+        """Backward-compatible alias for legacy OCR endpoint/tests."""
+        return await self.recognize_text(image_path)
     
     async def recognize_text(self, image_path: str) -> str:
         """

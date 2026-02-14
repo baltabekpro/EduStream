@@ -14,6 +14,7 @@ import uuid
 class UserRole(str, Enum):
     TEACHER = "teacher"
     ADMIN = "admin"
+    STUDENT = "student"
 
 
 class QuestionType(str, Enum):
@@ -99,7 +100,10 @@ class UserLogin(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Login response with token and user."""
+    """Login response with backward-compatible fields for web and tests."""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
     token: str
     user: User
 
