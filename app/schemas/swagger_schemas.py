@@ -333,6 +333,7 @@ class ShareConfig(BaseModel):
     viewOnly: Optional[bool] = True
     allowCopy: Optional[bool] = False
     password: Optional[str] = None
+    expiresAt: Optional[datetime] = None
 
 
 class ShareLink(BaseModel):

@@ -2,7 +2,7 @@
 AI Engine endpoints - aligned with Swagger specification.
 Orchestration of LLM requests, RAG context management, and prompt engineering.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Path
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.dependencies import get_current_teacher
@@ -47,6 +47,17 @@ def _normalize_question_type(raw_type: str) -> QuestionType:
     }
     normalized = aliases.get(value, "mcq")
     return QuestionType(normalized)
+
+
+def _to_question_payload(question: dict, fallback_type: str = "mcq") -> Question:
+    return Question(
+        id=question.get("id") or uuid.uuid4(),
+        type=_normalize_question_type(str(question.get("type", fallback_type))),
+        text=question.get("text") or question.get("question", ""),
+        options=question.get("options") or [],
+        correctAnswer=question.get("correctAnswer") or question.get("correct_answer", ""),
+        explanation=question.get("explanation")
+    )
 
 
 @router.get("/templates", response_model=list[QuizTemplate])
@@ -265,6 +276,96 @@ async def smart_action(
         )
 
 
+@router.get("/quizzes/{quiz_id}", response_model=Quiz)
+async def get_quiz_by_id(
+    quiz_id: str = Path(..., description="Quiz ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    try:
+        quiz_uuid = uuid.UUID(quiz_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid quiz id")
+
+    quiz = db.query(QuizModel).join(Material, QuizModel.material_id == Material.id).filter(
+        QuizModel.id == quiz_uuid,
+        Material.user_id == current_user.id
+    ).first()
+
+    if not quiz:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+
+    questions = [
+        _to_question_payload(q)
+        for q in (quiz.questions or [])
+        if isinstance(q, dict)
+    ]
+
+    return Quiz(
+        id=quiz.id,
+        materialId=quiz.material_id,
+        questions=questions,
+        createdAt=quiz.created_at
+    )
+
+
+@router.put("/quizzes/{quiz_id}", response_model=Quiz)
+async def update_quiz_by_id(
+    quiz_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_teacher)
+):
+    try:
+        quiz_uuid = uuid.UUID(quiz_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid quiz id")
+
+    quiz = db.query(QuizModel).join(Material, QuizModel.material_id == Material.id).filter(
+        QuizModel.id == quiz_uuid,
+        Material.user_id == current_user.id
+    ).first()
+
+    if not quiz:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+
+    incoming = payload.get("questions")
+    if not isinstance(incoming, list) or not incoming:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="questions must be a non-empty list")
+
+    normalized = []
+    for question in incoming:
+        if not isinstance(question, dict):
+            continue
+        text_value = (question.get("text") or question.get("question") or "").strip()
+        answer_value = (question.get("correctAnswer") or question.get("correct_answer") or "").strip()
+        if not text_value or not answer_value:
+            continue
+
+        normalized.append({
+            "id": str(question.get("id") or uuid.uuid4()),
+            "type": _normalize_question_type(str(question.get("type", "mcq"))).value,
+            "text": text_value,
+            "options": question.get("options") or [],
+            "correctAnswer": answer_value,
+            "explanation": question.get("explanation") or ""
+        })
+
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No valid questions provided")
+
+    quiz.questions = normalized
+    db.commit()
+    db.refresh(quiz)
+
+    return Quiz(
+        id=quiz.id,
+        materialId=quiz.material_id,
+        questions=[_to_question_payload(q) for q in normalized],
+        createdAt=quiz.created_at
+    )
+
+
 @router.post("/generate-quiz", response_model=Quiz)
 async def generate_quiz(
     config: dict,
@@ -386,16 +487,6 @@ async def generate_quiz(
         if not isinstance(questions_data, list):
             raise ValueError("AI returned invalid quiz format")
         
-        # Create quiz record
-        quiz = QuizModel(
-            material_id=material.id,
-            questions=questions_data
-        )
-        
-        db.add(quiz)
-        db.commit()
-        db.refresh(quiz)
-        
         # Convert to response format
         questions = []
         for q in questions_data:
@@ -408,18 +499,43 @@ async def generate_quiz(
                 continue
 
             questions.append(
-                Question(
-                    id=uuid.uuid4(),
-                    type=_normalize_question_type(str(q.get("type", question_type))),
-                    text=text_value,
-                    options=q.get("options"),
-                    correctAnswer=answer_value,
-                    explanation=q.get("explanation")
+                _to_question_payload(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "type": q.get("type", question_type),
+                        "text": text_value,
+                        "options": q.get("options"),
+                        "correctAnswer": answer_value,
+                        "explanation": q.get("explanation")
+                    },
+                    fallback_type=question_type
                 )
             )
 
         if not questions:
             raise ValueError("AI returned no valid questions")
+
+        normalized_for_storage = [
+            {
+                "id": str(q.id),
+                "type": q.type.value,
+                "text": q.text,
+                "options": q.options or [],
+                "correctAnswer": q.correctAnswer,
+                "explanation": q.explanation or ""
+            }
+            for q in questions
+        ]
+
+        # Create quiz record
+        quiz = QuizModel(
+            material_id=material.id,
+            questions=normalized_for_storage
+        )
+
+        db.add(quiz)
+        db.commit()
+        db.refresh(quiz)
         
         return Quiz(
             id=quiz.id,
