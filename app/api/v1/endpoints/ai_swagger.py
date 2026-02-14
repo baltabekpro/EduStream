@@ -357,14 +357,28 @@ async def generate_quiz(
             else:
                 questions_data = legacy_result
         else:
-            questions_data = await ai_service.generate_quiz_advanced(
-                text=content,
-                count=count,
-                difficulty=difficulty,
-                question_type=question_type
-            )
-            if inspect.isawaitable(questions_data):
-                questions_data = await questions_data
+            try:
+                questions_data = await ai_service.generate_quiz_advanced(
+                    text=content,
+                    count=count,
+                    difficulty=difficulty,
+                    question_type=question_type
+                )
+                if inspect.isawaitable(questions_data):
+                    questions_data = await questions_data
+            except Exception as advanced_error:
+                logger.warning(f"Advanced quiz generation failed, trying fallback: {advanced_error}")
+                fallback_result = await ai_service.generate_quiz(
+                    text=content,
+                    num_questions=count,
+                    difficulty=difficulty
+                )
+                if inspect.isawaitable(fallback_result):
+                    fallback_result = await fallback_result
+                if isinstance(fallback_result, dict) and "questions" in fallback_result:
+                    questions_data = fallback_result.get("questions", [])
+                else:
+                    questions_data = fallback_result
 
         if isinstance(questions_data, dict) and "questions" in questions_data:
             questions_data = questions_data.get("questions", [])
