@@ -1,0 +1,4 @@
+94-131-85-176.sslip.io {
+    # Automatic HTTPS via Let's Encrypt for sslip.io subdomain
+    reverse_proxy app:8000
+}
