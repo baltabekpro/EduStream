@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import sys
 import os
@@ -114,6 +115,11 @@ async def general_exception_handler(request, exc):
 
 # Include API router
 app.include_router(api_router)
+
+# Serve uploaded files (OCR/assignment attachments)
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+app.mount("/api/v1/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads_api")
 
 
 @app.get("/", tags=["Root"])

@@ -1,6 +1,7 @@
 from typing import Optional, Dict, List
 import json
 import re
+from collections import Counter
 import google.generativeai as genai
 from app.core.config import settings
 import logging
@@ -421,6 +422,118 @@ class AIService:
         except Exception as e:
             logger.error(f"Assignment generation error: {e}")
             raise ValueError(f"Failed to generate assignment: {str(e)}")
+
+    async def evaluate_assignment_submission(
+        self,
+        assignment_text: str,
+        student_answer: str,
+        max_score: int = 20
+    ) -> Dict[str, any]:
+        """
+        Evaluate assignment submission and return score + feedback.
+        Uses Gemini when configured; otherwise falls back to deterministic heuristic.
+        """
+        answer = (student_answer or "").strip()
+        task = (assignment_text or "").strip()
+        max_score = max(1, int(max_score or 20))
+
+        if not answer:
+            return {
+                "score": 0,
+                "maxScore": max_score,
+                "feedback": "Ответ пустой или не удалось извлечь текст.",
+                "strengths": [],
+                "improvements": ["Добавьте содержательный ответ по заданию."],
+                "confidence": "low"
+            }
+
+        if not self.client:
+            tokens_answer = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]+", answer.lower())
+            tokens_task = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]+", task.lower())
+
+            common = 0
+            if tokens_answer and tokens_task:
+                answer_counts = Counter(tokens_answer)
+                task_counts = Counter(tokens_task)
+                common = sum((answer_counts & task_counts).values())
+
+            answer_len = len(answer)
+            coverage = min(1.0, common / max(10, len(tokens_task))) if tokens_task else min(1.0, len(tokens_answer) / 120)
+            depth = min(1.0, answer_len / 1200)
+            heuristic = 0.45 * coverage + 0.55 * depth
+            score = max(1, min(max_score, round(heuristic * max_score)))
+
+            improvements = []
+            if coverage < 0.45:
+                improvements.append("Больше опирайтесь на ключевые пункты задания.")
+            if depth < 0.45:
+                improvements.append("Раскройте ответ подробнее и добавьте аргументацию.")
+            if not improvements:
+                improvements.append("Можно добавить один практический пример для усиления ответа.")
+
+            return {
+                "score": score,
+                "maxScore": max_score,
+                "feedback": "Автоматическая оценка выполнена по полноте и соответствию заданию.",
+                "strengths": ["Ответ предоставлен", "Есть связное содержание"],
+                "improvements": improvements,
+                "confidence": "medium"
+            }
+
+        prompt = (
+            "Ты проверяющий преподаватель. Оцени ответ ученика по заданию и верни только JSON.\n"
+            f"Максимальный балл: {max_score}.\n"
+            "Критерии: соответствие заданию, полнота, точность, структура, аргументация.\n"
+            "Верни строго JSON объекта формата:\n"
+            "{\n"
+            f"  \"score\": число от 0 до {max_score},\n"
+            f"  \"maxScore\": {max_score},\n"
+            "  \"feedback\": \"краткий итог (1-3 предложения)\",\n"
+            "  \"strengths\": [\"сильная сторона 1\", \"сильная сторона 2\"],\n"
+            "  \"improvements\": [\"что улучшить 1\", \"что улучшить 2\"],\n"
+            "  \"confidence\": \"high|medium|low\"\n"
+            "}\n\n"
+            f"ЗАДАНИЕ:\n{task[:3500]}\n\n"
+            f"ОТВЕТ УЧЕНИКА:\n{answer[:8000]}"
+        )
+
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.2,
+                    max_output_tokens=900,
+                )
+            )
+            clean_json = extract_json_from_response(response.text)
+            parsed = json.loads(clean_json)
+
+            raw_score = parsed.get("score", 0)
+            score = int(max(0, min(max_score, round(float(raw_score)))))
+            strengths = parsed.get("strengths") if isinstance(parsed.get("strengths"), list) else []
+            improvements = parsed.get("improvements") if isinstance(parsed.get("improvements"), list) else []
+            confidence = str(parsed.get("confidence", "medium")).lower()
+            if confidence not in {"high", "medium", "low"}:
+                confidence = "medium"
+
+            return {
+                "score": score,
+                "maxScore": max_score,
+                "feedback": str(parsed.get("feedback") or "Автоматическая оценка выполнена."),
+                "strengths": [str(item) for item in strengths][:4],
+                "improvements": [str(item) for item in improvements][:4],
+                "confidence": confidence,
+            }
+        except Exception as e:
+            logger.error(f"Assignment evaluation error: {e}")
+            return {
+                "score": 0,
+                "maxScore": max_score,
+                "feedback": "Не удалось выполнить автоматическую проверку, требуется ручная проверка.",
+                "strengths": [],
+                "improvements": ["Проверьте ответ вручную в разделе OCR."],
+                "confidence": "low"
+            }
 
 
 # Global instance

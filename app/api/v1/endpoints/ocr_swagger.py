@@ -24,6 +24,25 @@ from app.core.config import settings
 router = APIRouter(prefix="/ocr", tags=["OCR"])
 
 
+def to_public_upload_url(file_ref: str | None) -> str:
+    raw = (file_ref or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+
+    normalized = raw.replace("\\", "/")
+    if normalized.startswith("/api/v1/uploads/"):
+        return normalized
+    if normalized.startswith("/uploads/"):
+        return f"/api/v1{normalized}"
+
+    file_name = os.path.basename(normalized)
+    if not file_name:
+        return raw
+    return f"/api/v1/uploads/{file_name}"
+
+
 @router.post("/extract")
 async def extract_text_legacy(
     file: UploadFile = File(...),
@@ -100,7 +119,7 @@ async def get_ocr_result(
             name=ocr_result.student_name,
             accuracy=ocr_result.student_accuracy or 0
         ),
-        image=ocr_result.image_url,
+        image=to_public_upload_url(ocr_result.image_url),
         questions=questions
     )
 
@@ -236,16 +255,44 @@ async def get_ocr_queue(
         OCRResult.status.in_(["processing", "pending"])
     ).all()
     
-    queue_items = [
-        {
+    queue_items = []
+    for result in ocr_results:
+        # Build a short answer preview from stored regions
+        preview_text = ""
+        for region in (result.questions or []):
+            if isinstance(region, dict):
+                text_value = str(region.get("ocrText") or "").strip()
+                if text_value and not str(region.get("id", "")).startswith("assignment-meta"):
+                    preview_text = text_value[:300]
+                    break
+
+        # Extract AI feedback block if present
+        ai_feedback = next(
+            (r for r in (result.questions or []) if isinstance(r, dict) and r.get("id") == "assignment-ai-feedback"),
+            None,
+        )
+
+        raw_score = result.student_accuracy or 0
+        # student_accuracy stores 0-20 points; convert to 0-100 percent for the UI bar
+        accuracy_pct = round((raw_score / 20) * 100) if raw_score else 0
+
+        queue_items.append({
             "id": str(result.id),
-            "filename": result.image_url or "unknown",
+            # Fields expected by OCRService.getQueue() frontend mapper
+            "studentName": result.student_name or "Ученик",
+            "student_name": result.student_name or "Ученик",
+            "accuracy": accuracy_pct,
+            "subject": "Задание",
+            "image": to_public_upload_url(result.image_url) or "",
+            "filename": to_public_upload_url(result.image_url) or "unknown",
+            "questions": result.questions or [],
             "status": result.status,
-            "created_at": result.created_at.isoformat()
-        }
-        for result in ocr_results
-    ]
-    
+            "score": result.manual_score if result.manual_score is not None else result.student_accuracy,
+            "aiFeedback": ai_feedback.get("ocrText") if ai_feedback else None,
+            "previewText": preview_text,
+            "created_at": result.created_at.isoformat() if result.created_at else None,
+        })
+
     return {
         "queue": queue_items,
         "total": len(queue_items)

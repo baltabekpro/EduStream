@@ -8,7 +8,7 @@ from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.api.dependencies import get_current_teacher
-from app.models.models import User, Material, Quiz, StudentResult
+from app.models.models import User, Material, Quiz, StudentResult, OCRResult
 from app.schemas.swagger_schemas import (
     AnalyticsData,
     PerformanceItem,
@@ -39,6 +39,10 @@ def _extract_diary_comments(settings: dict | None, course_id: str) -> dict[str, 
         if isinstance(key, str) and isinstance(value, str):
             normalized[key.strip().lower()] = value
     return normalized
+
+
+def _normalize_status(value: str | None) -> str:
+    return (value or "pending").strip().lower()
 
 
 @router.get("/dashboard", response_model=AnalyticsDashboardResponse)
@@ -84,29 +88,60 @@ async def get_analytics_performance(
     if not material_ids:
         return AnalyticsData(performance=[], topics=[], students=[])
 
-    results = db.query(StudentResult).join(
+    quiz_results = db.query(StudentResult).join(
         Quiz, StudentResult.quiz_id == Quiz.id
     ).filter(
         StudentResult.user_id == current_user.id,
         Quiz.material_id.in_(material_ids)
     ).order_by(StudentResult.submission_date.asc()).all()
 
-    if not results:
+    assignment_rows = db.query(OCRResult).filter(
+        OCRResult.user_id == current_user.id,
+        OCRResult.course_id == courseId
+    ).order_by(OCRResult.created_at.asc()).all()
+
+    scored_assignments = []
+    for row in assignment_rows:
+        score_value = row.manual_score if row.manual_score is not None else row.student_accuracy
+        if score_value is None:
+            continue
+        scored_assignments.append({
+            "student": (row.student_name or "Ученик").strip() or "Ученик",
+            "score": int(score_value),
+            "date": row.updated_at or row.created_at,
+            "weak_topics": ["Задание"] if _normalize_status(row.status) not in {"graded", "reviewed"} else []
+        })
+
+    merged_attempts = [
+        {
+            "student": (item.student_identifier or "Ученик").strip() or "Ученик",
+            "score": int(item.score),
+            "date": item.submission_date,
+            "weak_topics": [str(topic).strip() for topic in (item.weak_topics or []) if str(topic).strip()]
+        }
+        for item in quiz_results
+    ] + scored_assignments
+
+    if not merged_attempts:
         return AnalyticsData(performance=[], topics=[], students=[])
 
     today = datetime.utcnow().date()
     performance_items: list[PerformanceItem] = []
     for offset in range(6, -1, -1):
         day = today - timedelta(days=offset)
-        day_results = [r.score for r in results if r.submission_date and r.submission_date.date() == day]
+        day_results = [
+            entry["score"]
+            for entry in merged_attempts
+            if entry.get("date") and entry["date"].date() == day
+        ]
         avg_day = round(sum(day_results) / len(day_results)) if day_results else 0
         performance_items.append(
             PerformanceItem(name=day.strftime("%d.%m"), value=avg_day)
         )
 
     topic_counter: Counter[str] = Counter()
-    for res in results:
-        weak_topics = res.weak_topics or []
+    for res in merged_attempts:
+        weak_topics = res.get("weak_topics") or []
         for topic in weak_topics:
             normalized = str(topic).strip()
             if normalized:
@@ -120,29 +155,29 @@ async def get_analytics_performance(
             color = "green" if score >= 80 else "yellow" if score >= 60 else "red"
             topics.append(TopicItem(name=topic_name, score=score, colorKey=color))
     else:
-        average = round(sum(r.score for r in results) / len(results))
+        average = round(sum(r["score"] for r in merged_attempts) / len(merged_attempts))
         baseline_color = "green" if average >= 80 else "yellow" if average >= 60 else "red"
         topics = [
             TopicItem(name="Общая успеваемость", score=average, colorKey=baseline_color),
-            TopicItem(name="Регулярность выполнения", score=min(100, len(results) * 5), colorKey="blue"),
+            TopicItem(name="Регулярность выполнения", score=min(100, len(merged_attempts) * 5), colorKey="blue"),
         ]
 
-    per_student: dict[str, list[StudentResult]] = defaultdict(list)
-    for item in results:
-        key = (item.student_identifier or "Ученик").strip()
+    per_student: dict[str, list[dict]] = defaultdict(list)
+    for item in merged_attempts:
+        key = (item.get("student") or "Ученик").strip()
         if not key:
             key = "Ученик"
         per_student[key].append(item)
 
     students: list[StudentMetric] = []
     for index, (student_name, student_items) in enumerate(per_student.items(), start=1):
-        student_items = sorted(student_items, key=lambda r: r.submission_date or datetime.min)
-        avg_score = sum(s.score for s in student_items) / len(student_items)
+        student_items = sorted(student_items, key=lambda r: r.get("date") or datetime.min)
+        avg_score = sum(float(s.get("score") or 0) for s in student_items) / len(student_items)
 
         recent_slice = student_items[-3:]
         previous_slice = student_items[-6:-3]
-        recent_avg = sum(s.score for s in recent_slice) / len(recent_slice)
-        previous_avg = sum(s.score for s in previous_slice) / len(previous_slice) if previous_slice else recent_avg
+        recent_avg = sum(float(s.get("score") or 0) for s in recent_slice) / len(recent_slice)
+        previous_avg = sum(float(s.get("score") or 0) for s in previous_slice) / len(previous_slice) if previous_slice else recent_avg
 
         if recent_avg > previous_avg + 2:
             trend = StudentTrend.UP
@@ -216,14 +251,19 @@ async def get_student_journal(
 
     material_map = {str(item.id): item.title for item in materials}
 
-    rows = db.query(StudentResult, Quiz).join(
+    quiz_rows = db.query(StudentResult, Quiz).join(
         Quiz, StudentResult.quiz_id == Quiz.id
     ).filter(
         StudentResult.user_id == current_user.id,
         Quiz.material_id.in_(material_ids)
     ).order_by(StudentResult.submission_date.desc()).all()
 
-    if not rows:
+    assignment_rows = db.query(OCRResult).filter(
+        OCRResult.user_id == current_user.id,
+        OCRResult.course_id == courseId
+    ).order_by(OCRResult.created_at.desc()).all()
+
+    if not quiz_rows and not assignment_rows:
         return {
             "courseId": courseId,
             "totalStudents": 0,
@@ -235,18 +275,48 @@ async def get_student_journal(
     comments_map = _extract_diary_comments(current_user.settings or {}, courseId)
     per_student: dict[str, list[dict]] = defaultdict(list)
 
-    for result, quiz in rows:
+    for result, quiz in quiz_rows:
         student_name = (result.student_identifier or "Ученик").strip() or "Ученик"
         student_key = _normalize_student_key(student_name)
         per_student[student_key].append({
             "resultId": str(result.id),
             "studentName": student_name,
             "score": int(result.score),
+            "hasScore": True,
+            "resultType": "quiz",
+            "status": "graded",
             "submittedAt": result.submission_date.isoformat() if result.submission_date else None,
             "quizId": str(quiz.id),
             "quizTitle": quiz.title or "Тест",
             "materialTitle": material_map.get(str(quiz.material_id), "Материал"),
             "weakTopics": [str(topic) for topic in (result.weak_topics or []) if topic]
+        })
+
+    for row in assignment_rows:
+        student_name = (row.student_name or "Ученик").strip() or "Ученик"
+        student_key = _normalize_student_key(student_name)
+        score_value = row.manual_score if row.manual_score is not None else row.student_accuracy
+        row_status = _normalize_status(row.status)
+
+        weak_topics = []
+        for region in (row.questions or []):
+            if isinstance(region, dict):
+                label_value = str(region.get("label") or "").strip()
+                if label_value:
+                    weak_topics.append(label_value)
+
+        per_student[student_key].append({
+            "resultId": str(row.id),
+            "studentName": student_name,
+            "score": int(score_value) if score_value is not None else 0,
+            "hasScore": score_value is not None,
+            "resultType": "assignment",
+            "status": row_status,
+            "submittedAt": (row.updated_at or row.created_at).isoformat() if (row.updated_at or row.created_at) else None,
+            "quizId": None,
+            "quizTitle": "Задание",
+            "materialTitle": "Ответ по заданию",
+            "weakTopics": weak_topics
         })
 
     students = []
@@ -260,11 +330,12 @@ async def get_student_journal(
             reverse=True
         )
         attempts = len(ordered)
-        scores = [int(item["score"]) for item in ordered]
+        scored_items = [item for item in ordered if item.get("hasScore")]
+        scores = [int(item["score"]) for item in scored_items]
         all_scores.extend(scores)
 
-        avg_score = round(sum(scores) / attempts, 1) if attempts else 0
-        last_score = scores[0] if scores else 0
+        avg_score = round(sum(scores) / len(scores), 1) if scores else 0
+        last_score = int(scored_items[0]["score"]) if scored_items else 0
 
         prev_window = scores[1:4]
         trend = "neutral"
