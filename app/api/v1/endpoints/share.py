@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import cast, String
 from app.core.database import get_db
 from app.core.config import settings
-from app.api.dependencies import get_current_teacher
+from app.api.dependencies import get_current_teacher, get_language
 from app.models.models import User, PublicLink, Quiz as QuizModel, Material, StudentResult, OCRResult
 from app.schemas.swagger_schemas import ShareConfig, ShareLink
 from app.core.security import get_password_hash, verify_password
@@ -457,7 +457,8 @@ async def upload_assignment_file(
     studentName: str | None = Form(default=None),
     responseText: str | None = Form(default=None),
     file: UploadFile | None = File(default=None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    language: str = Depends(get_language)
 ):
     """Public endpoint: upload completed assignment document for material shares."""
     short_code = validate_short_code_or_400(short_code)
@@ -563,6 +564,7 @@ async def upload_assignment_file(
             assignment_text=material.summary or material.content or "",
             student_answer=combined_answer,
             max_score=20,
+            language=language
         )
 
     # Always set pending so teacher can review AI result in the OCR queue.

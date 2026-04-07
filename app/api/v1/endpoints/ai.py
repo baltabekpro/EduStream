@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.dependencies import get_current_teacher
+from app.api.dependencies import get_current_teacher, get_language
 from app.models.models import User, Material, Quiz
 from app.schemas.schemas import (
     GenerateSummaryRequest,
@@ -20,7 +20,8 @@ router = APIRouter(prefix="/ai", tags=["AI Generation"])
 async def generate_summary(
     request: GenerateSummaryRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     """
     Generate summary and glossary from material using AI.
@@ -45,7 +46,7 @@ async def generate_summary(
     
     try:
         # Generate summary using AI
-        result = await ai_service.generate_summary(material.raw_text)
+        result = await ai_service.generate_summary(material.raw_text, language=language)
         
         if not result.get("is_educational", True):
             raise HTTPException(
@@ -77,7 +78,8 @@ async def generate_summary(
 async def generate_quiz(
     request: GenerateQuizRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     """
     Generate quiz questions from material using AI.
@@ -105,7 +107,8 @@ async def generate_quiz(
         questions = await ai_service.generate_quiz(
             material.raw_text,
             num_questions=request.num_questions,
-            difficulty=request.difficulty
+            difficulty=request.difficulty,
+            language=language
         )
         
         # Create quiz record

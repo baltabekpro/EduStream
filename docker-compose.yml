@@ -15,16 +15,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   app:
     build: .
     container_name: edustream_app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     volumes:
       - .:/app
       - ./uploads:/app/uploads
-    ports:
-      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -32,6 +31,23 @@ services:
       - DATABASE_URL=postgresql://edustream_user:edustream_password@db:5432/edustream_db
     env_file:
       - .env
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: edustream_caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:

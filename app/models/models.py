@@ -133,7 +133,7 @@ class Material(Base):
     file_url = Column(String, nullable=True)
     upload_date = Column(DateTime, default=datetime.utcnow, nullable=False)
     status = Column(Enum(MaterialStatus), default=MaterialStatus.PROCESSING, nullable=False)
-    course_id = Column(String, ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
+    course_id = Column(UUID(), ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships

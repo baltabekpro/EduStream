@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -61,3 +61,30 @@ async def get_current_teacher(
             detail="Only teachers and admins can access this endpoint"
         )
     return current_user
+
+
+async def get_language(
+    accept_language: Optional[str] = Header(None)
+) -> str:
+    """
+    Extract and validate language from Accept-Language header.
+    
+    Parses the Accept-Language header and returns the first supported language code.
+    Supported languages: ru (Russian), kk (Kazakh), en (English).
+    Defaults to 'ru' if header is missing or contains unsupported language.
+    
+    Args:
+        accept_language: Accept-Language header value (e.g., "kk,ru;q=0.9,en;q=0.8")
+    
+    Returns:
+        str: Validated language code ('ru', 'kk', or 'en')
+    """
+    supported_languages = {'ru', 'kk', 'en'}
+    
+    if accept_language:
+        # Parse header: "kk,ru;q=0.9,en;q=0.8" -> extract first language code
+        lang = accept_language.split(',')[0].split(';')[0].strip().lower()
+        if lang in supported_languages:
+            return lang
+    
+    return 'ru'  # Default to Russian

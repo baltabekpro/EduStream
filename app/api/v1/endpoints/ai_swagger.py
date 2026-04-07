@@ -5,7 +5,7 @@ Orchestration of LLM requests, RAG context management, and prompt engineering.
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Path
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.dependencies import get_current_teacher
+from app.api.dependencies import get_current_teacher, get_language
 from app.models.models import User, Material, Quiz as QuizModel, AISession
 from app.schemas.swagger_schemas import (
     QuizTemplate,
@@ -153,7 +153,8 @@ async def get_quiz_templates(
 async def generate_summary(
     request: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     """
     Генерация конспекта и глоссария.
@@ -209,8 +210,8 @@ async def generate_summary(
     content = material.content or material.raw_text
     
     try:
-        logger.info(f"Generating summary for material {material_id}")
-        result = await ai_service.generate_summary(content)
+        logger.info(f"Generating summary for material {material_id} in language {language}")
+        result = await ai_service.generate_summary(content, language=language)
         if inspect.isawaitable(result):
             result = await result
         logger.info(f"Summary generated successfully for material {material_id}")
@@ -228,7 +229,8 @@ async def generate_summary(
 async def ai_chat(
     request: ChatRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     """
     RAG Chat - основной эндпоинт для чата в AI Workspace.
@@ -265,7 +267,8 @@ async def ai_chat(
         # Call AI service with context
         response = await ai_service.chat_with_context(
             message=request.message,
-            context=context
+            context=context,
+            language=language
         )
 
         session = None
@@ -322,7 +325,8 @@ async def ai_chat(
 @router.post("/smart-action", response_model=SmartActionResponse)
 async def smart_action(
     request: SmartActionRequest,
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     """
     Контекстные действия (Smart Selection).
@@ -337,7 +341,8 @@ async def smart_action(
         result = await ai_service.perform_smart_action(
             text=request.text,
             action=request.action.value,
-            context=request.context
+            context=request.context,
+            language=language
         )
         
         return SmartActionResponse(result=result)
@@ -482,7 +487,8 @@ async def generate_quiz(
     config: dict,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     """
     Генератор тестов.
@@ -560,7 +566,8 @@ async def generate_quiz(
             legacy_result = await ai_service.generate_quiz(
                 text=content,
                 num_questions=count,
-                difficulty=difficulty
+                difficulty=difficulty,
+                language=language
             )
             if inspect.isawaitable(legacy_result):
                 legacy_result = await legacy_result
@@ -574,7 +581,8 @@ async def generate_quiz(
                     text=content,
                     count=count,
                     difficulty=difficulty,
-                    question_type=question_type
+                    question_type=question_type,
+                    language=language
                 )
                 if inspect.isawaitable(questions_data):
                     questions_data = await questions_data
@@ -583,7 +591,8 @@ async def generate_quiz(
                 fallback_result = await ai_service.generate_quiz(
                     text=content,
                     num_questions=count,
-                    difficulty=difficulty
+                    difficulty=difficulty,
+                    language=language
                 )
                 if inspect.isawaitable(fallback_result):
                     fallback_result = await fallback_result
@@ -679,7 +688,8 @@ async def generate_quiz(
 async def generate_assignment(
     payload: AssignmentGenerateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     try:
         material_uuid = uuid.UUID(str(payload.materialId))
@@ -699,7 +709,7 @@ async def generate_assignment(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Material has no text content")
 
     try:
-        assignment_text = await ai_service.generate_assignment(content, payload.instruction or "")
+        assignment_text = await ai_service.generate_assignment(content, payload.instruction or "", language=language)
         material.summary = assignment_text
         db.commit()
         db.refresh(material)
@@ -720,7 +730,8 @@ async def generate_assignment(
 async def regenerate_block(
     request: RegenerateBlockRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_teacher)
+    current_user: User = Depends(get_current_teacher),
+    language: str = Depends(get_language)
 ):
     """
     Точечная перегенерация.
@@ -735,7 +746,8 @@ async def regenerate_block(
         
         regenerated = await ai_service.regenerate_question(
             current_text=request.currentText,
-            instruction=request.instruction or "Улучши этот вопрос"
+            instruction=request.instruction or "Улучши этот вопрос",
+            language=language
         )
         
         return Question(

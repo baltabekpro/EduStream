@@ -45,10 +45,14 @@ class AIService:
             self.client = None
             self.model = None
     
-    async def generate_summary(self, text: str) -> Dict[str, any]:
+    async def generate_summary(self, text: str, language: str = 'ru') -> Dict[str, any]:
         """
         Generate summary and glossary from educational text.
         Returns dict with 'summary' and 'glossary'.
+        
+        Args:
+            text: Educational text to summarize
+            language: Target language for generation ('ru', 'kk', 'en')
         """
         if not self.client:
             # Mock response for testing without API key
@@ -58,7 +62,17 @@ class AIService:
                 "glossary": {"Term1": "Definition 1", "Term2": "Definition 2"}
             }
         
-        prompt = """Ты опытный методист. Проанализируй следующий текст и создай:
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Отвечай на русском языке.',
+            'kk': 'Қазақ тілінде жауап беріңіз.',
+            'en': 'Respond in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
+        
+        prompt = f"""{lang_instruction}
+
+Ты опытный методист. Проанализируй следующий текст и создай:
 1. Краткий конспект (summary) основных идей
 2. Глоссарий (glossary) ключевых терминов и их определений
 
@@ -67,11 +81,11 @@ class AIService:
 ВАЖНО: Верни ТОЛЬКО JSON без дополнительного текста, объяснений или markdown форматирования.
 
 Формат JSON:
-{
+{{
     "is_educational": true/false,
     "summary": "текст конспекта",
-    "glossary": {"термин1": "определение1", "термин2": "определение2"}
-}
+    "glossary": {{"термин1": "определение1", "термин2": "определение2"}}
+}}
 
 Текст для анализа:
 """ + text[:4000]  # Limit text length
@@ -100,11 +114,18 @@ class AIService:
         self, 
         text: str, 
         num_questions: int = 5, 
-        difficulty: str = "medium"
+        difficulty: str = "medium",
+        language: str = 'ru'
     ) -> List[Dict]:
         """
         Generate quiz questions from educational text.
         Returns list of questions.
+        
+        Args:
+            text: Educational text to generate quiz from
+            num_questions: Number of questions to generate
+            difficulty: Difficulty level ('easy', 'medium', 'hard')
+            language: Target language for generation ('ru', 'kk', 'en')
         """
         if not self.client:
             # Mock response for testing without API key
@@ -123,7 +144,17 @@ class AIService:
                 }
             ]
         
-        prompt = f"""Ты опытный методист. Создай тест из {num_questions} вопросов по следующему материалу.
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Отвечай на русском языке.',
+            'kk': 'Қазақ тілінде жауап беріңіз.',
+            'en': 'Respond in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
+        
+        prompt = f"""{lang_instruction}
+
+Ты опытный методист. Создай тест из {num_questions} вопросов по следующему материалу.
 Уровень сложности: {difficulty}
 
 Требования:
@@ -177,11 +208,19 @@ class AIService:
         text: str,
         count: int,
         difficulty: str,
-        question_type: str
+        question_type: str,
+        language: str = 'ru'
     ) -> List[Dict]:
         """
         Advanced quiz generation with strict difficulty and type control.
         Implements parametric generation as per Swagger requirements.
+        
+        Args:
+            text: Educational text to generate quiz from
+            count: Number of questions to generate
+            difficulty: Difficulty level ('easy', 'medium', 'hard')
+            question_type: Type of questions ('mcq', 'open', 'boolean')
+            language: Target language for generation ('ru', 'kk', 'en')
         """
         if not self.client:
             # Mock response
@@ -196,6 +235,14 @@ class AIService:
                 for i in range(count)
             ]
         
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Отвечай на русском языке.',
+            'kk': 'Қазақ тілінде жауап беріңіз.',
+            'en': 'Respond in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
+        
         # Difficulty-aware prompt engineering
         difficulty_prompts = {
             "easy": "Вопросы должны проверять базовое понимание и запоминание. Используй простые формулировки.",
@@ -209,7 +256,9 @@ class AIService:
             "boolean": "Создай вопросы типа Верно/Неверно."
         }
         
-        prompt = f"""Ты опытный методист. Создай {count} вопросов по материалу.
+        prompt = f"""{lang_instruction}
+
+Ты опытный методист. Создай {count} вопросов по материалу.
 
 Уровень сложности: {difficulty}
 {difficulty_prompts.get(difficulty, difficulty_prompts["medium"])}
@@ -258,14 +307,27 @@ class AIService:
             logger.error(f"Advanced quiz generation error: {e}")
             raise ValueError(f"Failed to generate quiz: {str(e)}")
     
-    async def chat_with_context(self, message: str, context: str = "") -> str:
+    async def chat_with_context(self, message: str, context: str = "", language: str = 'ru') -> str:
         """
         RAG chat with material context.
+        
+        Args:
+            message: User message
+            context: Material context for RAG
+            language: Target language for response ('ru', 'kk', 'en')
         """
         if not self.client:
             return f"Mock AI response to: {message}"
         
-        system_prompt = "Ты виртуальный ассистент учителя. Помогай создавать учебные материалы."
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Отвечай на русском языке.',
+            'kk': 'Қазақ тілінде жауап беріңіз.',
+            'en': 'Respond in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
+        
+        system_prompt = f"{lang_instruction}\n\nТы виртуальный ассистент учителя. Помогай создавать учебные материалы."
         if context:
             system_prompt += f"\n\nКонтекст из материала:\n{context}"
         
@@ -287,14 +349,29 @@ class AIService:
         self,
         text: str,
         action: str,
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        language: str = 'ru'
     ) -> str:
         """
         Perform smart text transformations.
         Actions: explain, simplify, translate, summarize
+        
+        Args:
+            text: Text to transform
+            action: Action to perform
+            context: Optional context
+            language: Target language for output ('ru', 'kk', 'en')
         """
         if not self.client:
             return f"Mock {action} of: {text[:50]}..."
+        
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Отвечай на русском языке.',
+            'kk': 'Қазақ тілінде жауап беріңіз.',
+            'en': 'Respond in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
         
         action_prompts = {
             "explain": "Объясни следующий текст простыми словами для школьника:",
@@ -303,7 +380,7 @@ class AIService:
             "summarize": "Создай краткое резюме следующего текста:"
         }
         
-        prompt = action_prompts.get(action, action_prompts["explain"])
+        prompt = f"{lang_instruction}\n\n{action_prompts.get(action, action_prompts['explain'])}"
         if context:
             prompt += f"\n\nКонтекст: {context}\n\n"
         prompt += f"Текст: {text}"
@@ -325,10 +402,16 @@ class AIService:
     async def regenerate_question(
         self,
         current_text: str,
-        instruction: str
+        instruction: str,
+        language: str = 'ru'
     ) -> Dict:
         """
         Regenerate a single question with context preservation.
+        
+        Args:
+            current_text: Current question text
+            instruction: Instruction for improvement
+            language: Target language for generation ('ru', 'kk', 'en')
         """
         if not self.client:
             return {
@@ -339,7 +422,17 @@ class AIService:
                 "explanation": "Explanation"
             }
         
-        prompt = f"""Ты методист. У тебя есть вопрос теста, который нужно улучшить.
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Отвечай на русском языке.',
+            'kk': 'Қазақ тілінде жауап беріңіз.',
+            'en': 'Respond in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
+        
+        prompt = f"""{lang_instruction}
+
+Ты методист. У тебя есть вопрос теста, который нужно улучшить.
 
 Текущий вопрос:
 {current_text}
@@ -383,10 +476,16 @@ class AIService:
     async def generate_assignment(
         self,
         text: str,
-        instruction: str = ""
+        instruction: str = "",
+        language: str = 'ru'
     ) -> str:
         """
         Generate assignment text based on educational material.
+        
+        Args:
+            text: Educational material text
+            instruction: Optional instruction from teacher
+            language: Target language for generation ('ru', 'kk', 'en')
         """
         if not self.client:
             return (
@@ -395,13 +494,21 @@ class AIService:
                 "3) Подготовьте краткий вывод (5-7 предложений)."
             )
 
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Пиши на русском языке.',
+            'kk': 'Қазақ тілінде жазыңыз.',
+            'en': 'Write in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
+
         prompt = (
+            f"{lang_instruction}\n\n"
             "Ты опытный преподаватель. Составь задание для учеников по материалу ниже.\n"
             "Требования:\n"
             "- Чёткая структура шагов\n"
             "- Понятные критерии результата\n"
             "- Подходит для отправки учеником текста и/или файла\n"
-            "- Пиши на русском языке\n"
             "- Верни только чистый текст задания без markdown и без лишних вступлений\n\n"
             f"Дополнительная инструкция учителя: {instruction or 'нет'}\n\n"
             f"Материал:\n{text[:4500]}"
@@ -427,11 +534,18 @@ class AIService:
         self,
         assignment_text: str,
         student_answer: str,
-        max_score: int = 20
+        max_score: int = 20,
+        language: str = 'ru'
     ) -> Dict[str, any]:
         """
         Evaluate assignment submission and return score + feedback.
         Uses Gemini when configured; otherwise falls back to deterministic heuristic.
+        
+        Args:
+            assignment_text: The assignment text
+            student_answer: Student's answer
+            max_score: Maximum score
+            language: Target language for feedback ('ru', 'kk', 'en')
         """
         answer = (student_answer or "").strip()
         task = (assignment_text or "").strip()
@@ -480,7 +594,16 @@ class AIService:
                 "confidence": "medium"
             }
 
+        # Language-specific instructions
+        language_instructions = {
+            'ru': 'Отвечай на русском языке.',
+            'kk': 'Қазақ тілінде жауап беріңіз.',
+            'en': 'Respond in English.'
+        }
+        lang_instruction = language_instructions.get(language, language_instructions['ru'])
+
         prompt = (
+            f"{lang_instruction}\n\n"
             "Ты проверяющий преподаватель. Оцени ответ ученика по заданию и верни только JSON.\n"
             f"Максимальный балл: {max_score}.\n"
             "Критерии: соответствие заданию, полнота, точность, структура, аргументация.\n"
