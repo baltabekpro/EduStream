@@ -296,6 +296,7 @@ async def get_teacher_assignment_results(
 async def get_shared_resource(
     short_code: str,
     password: str | None = Query(default=None),
+    studentName: str | None = Query(default=None),
     db: Session = Depends(get_db)
 ):
     """Public endpoint: get shared resource by short code."""
@@ -310,6 +311,8 @@ async def get_shared_resource(
     if link.password:
         if not password or not verify_password(password, link.password):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Password required or invalid")
+
+    normalized_student_name = (studentName or "").strip()[:255]
 
     if link.resource_type == "quiz":
         try:
@@ -334,6 +337,18 @@ async def get_shared_resource(
                 "options": q.get("options") or [],
             })
 
+        already_submitted = False
+        submitted_at = None
+        if normalized_student_name:
+            existing = db.query(StudentResult).filter(
+                StudentResult.user_id == link.user_id,
+                StudentResult.quiz_id == quiz.id,
+                StudentResult.student_identifier == normalized_student_name
+            ).order_by(StudentResult.submission_date.desc()).first()
+            if existing:
+                already_submitted = True
+                submitted_at = existing.submission_date.isoformat() if existing.submission_date else None
+
         return {
             "resourceType": "quiz",
             "shortCode": short_code,
@@ -341,7 +356,9 @@ async def get_shared_resource(
             "allowCopy": link.allow_copy,
             "title": quiz.title or (material.title if material else "Quiz"),
             "quizId": str(quiz.id),
-            "questions": questions
+            "questions": questions,
+            "alreadySubmitted": already_submitted,
+            "submittedAt": submitted_at
         }
 
     if link.resource_type == "material":
@@ -354,16 +371,30 @@ async def get_shared_resource(
         if not material:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
 
+        already_submitted = False
+        submitted_at = None
+        if normalized_student_name:
+            duplicate = db.query(OCRResult).filter(
+                OCRResult.user_id == link.user_id,
+                OCRResult.student_name == normalized_student_name,
+                cast(OCRResult.questions, String).ilike(f"%assignment-meta:{short_code}%")
+            ).order_by(OCRResult.created_at.desc()).first()
+            if duplicate:
+                already_submitted = True
+                submitted_at = duplicate.created_at.isoformat() if duplicate.created_at else None
+
         return {
             "resourceType": "material",
             "shortCode": short_code,
             "viewOnly": link.view_only,
             "allowCopy": link.allow_copy,
-            "title": f"Задание: {material.title}",
+            "title": material.title,
             "materialId": str(material.id),
             "description": (material.summary or material.content or "").strip()[:1200],
             "acceptUploads": True,
             "acceptTextResponse": True,
+            "alreadySubmitted": already_submitted,
+            "submittedAt": submitted_at,
         }
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported shared resource")
@@ -398,6 +429,17 @@ async def submit_shared_quiz(
 
     answers = payload.get("answers") or {}
     student_name = (payload.get("studentName") or "Student").strip()[:255]
+
+    existing_attempt = db.query(StudentResult).filter(
+        StudentResult.user_id == link.user_id,
+        StudentResult.quiz_id == quiz.id,
+        StudentResult.student_identifier == student_name
+    ).first()
+    if existing_attempt:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already submitted this test"
+        )
 
     questions = [q for q in (quiz.questions or []) if isinstance(q, dict)]
     if not questions:
